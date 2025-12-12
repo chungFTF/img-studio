@@ -164,6 +164,22 @@ export default function GenerateForm({
     return hasReferences ? EditImageFormFields.modelVersion : GenerateImageFormFields.modelVersion
   }, [generationType, hasReferences])
 
+  // Adjust sampleCount options based on model type
+  // Gemini: fixed at 2, Imagen: fixed at 4
+  const adjustedSettings = React.useMemo(() => {
+    const isGemini = currentModel?.includes('gemini')
+    if (generationFields.settings.sampleCount) {
+      return {
+        ...generationFields.settings,
+        sampleCount: {
+          ...generationFields.settings.sampleCount,
+          options: isGemini ? ['2'] : ['4'], // Fixed options based on model
+        },
+      }
+    }
+    return generationFields.settings
+  }, [currentModel, generationFields.settings])
+
   // Determines if the prompt is optional for video generation (e.g., for image-to-video).
   const optionalVeoPrompt =
     (interpolImageFirst && interpolImageFirst.base64Image !== '') ||
@@ -238,12 +254,11 @@ export default function GenerateForm({
     if (currentModel.includes('veo-2.0')) setValue('resolution', '720p')
     else if (currentModel.includes('veo-3.0')) setValue('resolution', '1080p')
 
-    // Gemini models support max 2 images per request (with delay between)
+    // Set fixed sample count based on model type
     if (currentModel.includes('gemini')) {
-      const currentCount = parseInt(getValues('sampleCount') || '1')
-      if (currentCount > 2) {
-        setValue('sampleCount', '2')
-      }
+      setValue('sampleCount', '2') // Gemini always generates 2 images
+    } else if (currentModel.includes('imagen')) {
+      setValue('sampleCount', '4') // Imagen always generates 4 images
     }
   }, [currentModel, isAdvancedFeaturesAvailable, isOnlyITVavailable, setValue])
 
@@ -398,16 +413,8 @@ export default function GenerateForm({
       const isGeminiModel = formData.modelVersion.includes('gemini')
 
       if (isGeminiModel) {
-        // Use Gemini native image generation
-        const geminiFormData = {
-          prompt: formData.prompt,
-          modelVersion: formData.modelVersion,
-          sampleCount: formData.sampleCount,
-          aspectRatio: formData.aspectRatio,
-          negativePrompt: formData.negativePrompt,
-        }
-
-        const newGeneratedImages = await generateImageWithGemini(geminiFormData, appContext)
+        // Use Gemini native image generation with full form data (including style attributes)
+        const newGeneratedImages = await generateImageWithGemini(formData, appContext)
 
         if (typeof newGeneratedImages === 'object' && 'error' in newGeneratedImages) {
           let errorMsg = newGeneratedImages['error'].replaceAll('Error: ', '')
@@ -577,7 +584,7 @@ export default function GenerateForm({
               control={control}
               setValue={setValue}
               generalSettingsFields={
-                currentModel.includes('veo-3.0') ? tempVeo3specificSettings : generationFields.settings
+                currentModel.includes('veo-3.0') ? tempVeo3specificSettings : adjustedSettings
               }
               advancedSettingsFields={generationFields.advancedSettings}
             />

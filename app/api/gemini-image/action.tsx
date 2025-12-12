@@ -15,7 +15,7 @@
 'use server'
 
 import { appContextDataI } from '../../context/app-context'
-import { ImageI, RatioToPixel } from '../generate-image-utils'
+import { ImageI, RatioToPixel, GenerateImageFormI, imageGenerationUtils } from '../generate-image-utils'
 import { uploadBase64Image, getSignedURL } from '../cloud-storage/action'
 const { GoogleAuth } = require('google-auth-library')
 
@@ -29,17 +29,10 @@ function cleanResult(inputString: string) {
   return inputString.toString().replaceAll('\n', '').replaceAll(/\//g, '').replaceAll('*', '')
 }
 
-export interface GeminiImageFormI {
-  prompt: string
-  modelVersion: string
-  sampleCount: string
-  aspectRatio: string
-  negativePrompt: string
-}
-
 // Gemini Native Image Generation using responseModalities
+// Now accepts the full GenerateImageFormI to include style attributes
 export async function generateImageWithGemini(
-  formData: GeminiImageFormI,
+  formData: GenerateImageFormI,
   appContext: appContextDataI | null
 ): Promise<ImageI[] | { error: string }> {
   // 1 - Authenticate to Google Cloud
@@ -77,12 +70,37 @@ export async function generateImageWithGemini(
   const uniqueFolderId = generateUniqueFolderId()
   const folderName = generationGcsURI.split(bucketName + '/')[1] + '/' + uniqueFolderId
 
-  // Build prompt with quality enhancement for sharper images
+  // Build prompt with style attributes (same as Imagen)
   let fullPrompt = formData.prompt
+
+  // Add the photo/art/digital style to the prompt
+  if (formData.style && formData.secondary_style) {
+    fullPrompt = `A ${formData.secondary_style} ${formData.style} of ${fullPrompt}`
+  }
+
+  // Add additional parameters (light, perspective, colors, etc.)
+  let parameters = ''
+  imageGenerationUtils.fullPromptFields.forEach((additionalField) => {
+    const fieldValue = formData[additionalField as keyof GenerateImageFormI]
+    if (fieldValue && typeof fieldValue === 'string' && fieldValue !== '') {
+      parameters += ` ${fieldValue} ${String(additionalField).replaceAll('_', ' ')}, `
+    }
+  })
+  if (parameters !== '') fullPrompt = `${fullPrompt}, ${parameters}`
+
+  // Add quality modifiers based on use_case
+  let quality_modifiers = ''
+  if (formData.use_case === 'Food, insects, plants (still life)')
+    quality_modifiers = ', High detail, precise focusing, controlled lighting'
+  if (formData.use_case === 'Sports, wildlife (motion)')
+    quality_modifiers = ', Fast shutter speed, movement tracking'
+  if (formData.use_case === 'Astronomical, landscape (wide-angle)')
+    quality_modifiers = ', Long exposure times, sharp focus, long exposure, smooth water or clouds'
   
-  // Add quality modifiers to improve image sharpness
-  const qualityModifiers = 'High resolution, high quality, detailed, sharp focus, crisp details'
-  fullPrompt = `${fullPrompt}. ${qualityModifiers}`
+  fullPrompt = fullPrompt + quality_modifiers
+
+  // Add general quality modifiers for sharper images
+  fullPrompt = `${fullPrompt}. High resolution, high quality, detailed, sharp focus, crisp details`
   
   if (formData.negativePrompt) {
     fullPrompt = `${fullPrompt}. Avoid: ${formData.negativePrompt}`
