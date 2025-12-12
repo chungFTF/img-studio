@@ -93,11 +93,16 @@ export async function generateImageWithGemini(
     fullPrompt = `${fullPrompt}. Generate in ${formData.aspectRatio} aspect ratio.`
   }
 
-  // Gemini image generation: limit to 1 image per request to avoid rate limiting
-  const actualSampleCount = 1
+  // Gemini image generation: allow up to 2 images with delay between requests
+  const maxGeminiSamples = 2
+  const actualSampleCount = Math.min(parseInt(formData.sampleCount) || 1, maxGeminiSamples)
 
-  // Generate single image
+  // Generate images sequentially with delay to avoid rate limiting
   for (let i = 0; i < actualSampleCount; i++) {
+    // Add delay between requests (except for the first one)
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 2000)) // 2 second delay
+    }
     const reqData = {
       contents: [
         {

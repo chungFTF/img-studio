@@ -238,9 +238,12 @@ export default function GenerateForm({
     if (currentModel.includes('veo-2.0')) setValue('resolution', '720p')
     else if (currentModel.includes('veo-3.0')) setValue('resolution', '1080p')
 
-    // Gemini models only support 1 image per request
+    // Gemini models support max 2 images per request (with delay between)
     if (currentModel.includes('gemini')) {
-      setValue('sampleCount', '1')
+      const currentCount = parseInt(getValues('sampleCount') || '1')
+      if (currentCount > 2) {
+        setValue('sampleCount', '2')
+      }
     }
   }, [currentModel, isAdvancedFeaturesAvailable, isOnlyITVavailable, setValue])
 
