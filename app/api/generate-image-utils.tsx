@@ -97,6 +97,18 @@ export const GenerateImageFormFields = {
         label: 'Imagen 4 - Fast',
         indication: 'Low latency model version',
       },
+      {
+        value: 'gemini-2.0-flash-exp',
+        label: 'Gemini 2.0 Flash (Nano Banana)',
+        indication: 'Gemini native image generation with text rendering',
+        type: 'gemini',
+      },
+      {
+        value: 'gemini-2.5-flash-image',
+        label: 'Gemini 2.5 Flash (Nano Banana Pro)',
+        indication: 'Latest Gemini image generation with enhanced quality',
+        type: 'gemini',
+      },
     ],
     isDataResetable: false,
     isFullPromptAdditionalField: false,

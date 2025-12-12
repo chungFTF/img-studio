@@ -52,12 +52,27 @@ export const EditImageFormFields = {
   modelVersion: {
     type: 'select',
     label: 'Model version',
-    default: 'imagen-3.0-capability-001',
+    default: 'imagegeneration@006',
     options: [
+      {
+        value: 'imagegeneration@006',
+        label: 'Imagen 2',
+        indication: 'Supports mask-based editing',
+      },
       {
         value: 'imagen-3.0-capability-001',
         label: 'Imagen 3',
-        indication: '',
+        indication: 'Requires access approval',
+      },
+      {
+        value: 'gemini-2.0-flash-exp',
+        label: 'Gemini 2.0 Flash (Nano Banana)',
+        indication: 'Text-based editing (no mask required)',
+      },
+      {
+        value: 'gemini-2.5-flash-image',
+        label: 'Gemini 2.5 Flash (Nano Banana Pro)',
+        indication: 'Text-based editing (no mask required)',
       },
     ],
     isDataResetable: false,

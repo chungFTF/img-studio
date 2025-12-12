@@ -124,12 +124,12 @@ export default function OutputImagesDisplay({
                     src={image.src}
                     alt={image.altText}
                     style={{ width: '100%', height: 'auto' }}
-                    width={image.width}
-                    height={image.height}
+                    width={image.width || 1024}
+                    height={image.height || 1024}
                     placeholder="blur"
                     blurDataURL={blurDataURL}
                     loading="lazy"
-                    quality={80}
+                    quality={90}
                     onContextMenu={(event: React.MouseEvent<HTMLImageElement>) => {
                       event.preventDefault()
                     }}

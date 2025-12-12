@@ -27,6 +27,7 @@ import { ImageI } from '../../api/generate-image-utils'
 
 import theme from '../../theme'
 import { buildImageListFromURI, editImage, upscaleImage } from '../../api/imagen/action'
+import { editImageWithGemini } from '../../api/gemini-image/action'
 import { CustomizedAvatarButton, CustomizedIconButton, CustomizedSendButton } from '../ux-components/Button-SX'
 import CustomTooltip from '../ux-components/Tooltip'
 import { appContextDataDefault, useAppContext } from '../../context/app-context'
@@ -85,6 +86,8 @@ export default function EditForm({
   const [outpaintedImage, setOutpaintedImage] = useState<string | null>(null)
 
   const [imageWidth, imageHeight, imageRatio] = watch(['width', 'height', 'ratio'])
+  const currentModel = watch('modelVersion')
+  const isGeminiModel = currentModel?.includes('gemini')
   const [maskSize, setMaskSize] = useState({ width: 0, height: 0 })
 
   const [originalImage, setOriginalImage] = useState<string | null>(null)
@@ -179,24 +182,53 @@ export default function EditForm({
     onRequestSent(true, parseInt(formData.sampleCount), true)
 
     try {
-      if (
-        formData['inputImage'] === '' ||
-        (selectedEditMode?.mandatoryPrompt && formData['prompt'] === '') ||
-        (selectedEditMode?.mandatoryMask && formData['inputMask'] === '')
-      )
-        throw Error('Missing either image, prompt or mask')
+      // For Gemini models, only image and prompt are required (no mask)
+      if (formData.modelVersion.includes('gemini')) {
+        if (formData['inputImage'] === '' || formData['prompt'] === '') {
+          throw Error('Missing image or prompt')
+        }
 
-      const newEditedImage = await editImage(formData, appContext)
+        const newEditedImage = await editImageWithGemini(
+          {
+            prompt: formData.prompt,
+            modelVersion: formData.modelVersion,
+            sampleCount: '1', // Gemini only supports 1 image at a time
+            inputImage: formData.inputImage,
+            negativePrompt: formData.negativePrompt,
+          },
+          appContext
+        )
 
-      if (newEditedImage !== undefined && typeof newEditedImage === 'object' && 'error' in newEditedImage) {
-        const errorMsg = newEditedImage['error'].replaceAll('Error: ', '')
-        throw Error(errorMsg)
+        if (newEditedImage !== undefined && typeof newEditedImage === 'object' && 'error' in newEditedImage) {
+          const errorMsg = newEditedImage['error'].replaceAll('Error: ', '')
+          throw Error(errorMsg)
+        } else {
+          newEditedImage.map((image) => {
+            if ('warning' in image) onNewErrorMsg(image['warning'] as string)
+          })
+          onImageGeneration(newEditedImage)
+        }
       } else {
-        newEditedImage.map((image) => {
-          if ('warning' in image) onNewErrorMsg(image['warning'] as string)
-        })
+        // For Imagen models, use the original mask-based editing
+        if (
+          formData['inputImage'] === '' ||
+          (selectedEditMode?.mandatoryPrompt && formData['prompt'] === '') ||
+          (selectedEditMode?.mandatoryMask && formData['inputMask'] === '')
+        )
+          throw Error('Missing either image, prompt or mask')
 
-        onImageGeneration(newEditedImage)
+        const newEditedImage = await editImage(formData, appContext)
+
+        if (newEditedImage !== undefined && typeof newEditedImage === 'object' && 'error' in newEditedImage) {
+          const errorMsg = newEditedImage['error'].replaceAll('Error: ', '')
+          throw Error(errorMsg)
+        } else {
+          newEditedImage.map((image) => {
+            if ('warning' in image) onNewErrorMsg(image['warning'] as string)
+          })
+
+          onImageGeneration(newEditedImage)
+        }
       }
     } catch (error: any) {
       onNewErrorMsg(error.toString())
@@ -288,7 +320,18 @@ export default function EditForm({
           )}
         </>
 
-        <EditModeMenu handleNewEditMode={handleNewEditMode} selectedEditMode={selectedEditMode} />
+        {/* Hide edit mode menu for Gemini models - they use text-based editing */}
+        {!isGeminiModel && (
+          <EditModeMenu handleNewEditMode={handleNewEditMode} selectedEditMode={selectedEditMode} />
+        )}
+        
+        {isGeminiModel && (
+          <Box sx={{ pb: 2 }}>
+            <Typography variant="body2" color={palette.text.secondary} sx={{ fontStyle: 'italic' }}>
+              Gemini uses text-based editing. Describe the changes you want to make to the image.
+            </Typography>
+          </Box>
+        )}
 
         <Box sx={{ pb: 4 }}>
           <EditImageDropzone
@@ -306,12 +349,13 @@ export default function EditForm({
           />
         </Box>
 
-        {selectedEditMode?.promptIndication && (
+        {/* For Gemini: always show prompt input. For Imagen: show based on edit mode */}
+        {(isGeminiModel || selectedEditMode?.promptIndication) && (
           <FormInputText
             name="prompt"
             control={control}
-            label={selectedEditMode?.promptIndication ?? ''}
-            required={selectedEditMode?.mandatoryPrompt}
+            label={isGeminiModel ? 'Describe how you want to edit the image' : (selectedEditMode?.promptIndication ?? '')}
+            required={isGeminiModel || selectedEditMode?.mandatoryPrompt || false}
             rows={3}
           />
         )}
@@ -335,10 +379,11 @@ export default function EditForm({
               </Avatar>
             </IconButton>
           </CustomTooltip>
-          {!isUpscaleMode && (
+          {!isUpscaleMode && !isGeminiModel && (
             <FormInputEditSettings control={control} setValue={setValue} editSettingsFields={editSettingsFields} />
           )}
-          {selectedEditMode?.mandatoryMask && selectedEditMode?.maskType && (
+          {/* Hide mask button for Gemini models */}
+          {!isGeminiModel && selectedEditMode?.mandatoryMask && selectedEditMode?.maskType && (
             <Button
               variant="contained"
               onClick={handleMaskDialogOpen}
@@ -354,7 +399,11 @@ export default function EditForm({
             type={isUpscaleMode ? 'button' : 'submit'}
             onClick={isUpscaleMode ? () => setOpenUpscaleDialog(true) : undefined}
             variant="contained"
-            disabled={(maskImage === null && selectedEditMode?.mandatoryMask) || imageToEdit === null || isLoading}
+            disabled={
+              isGeminiModel
+                ? imageToEdit === null || isLoading
+                : (maskImage === null && selectedEditMode?.mandatoryMask) || imageToEdit === null || isLoading
+            }
             endIcon={isLoading ? <WatchLaterIcon /> : <SendIcon />}
             sx={CustomizedSendButton}
           >

@@ -35,3 +35,7 @@ next-env.d.ts
 
 package-lock.json
 
+
+# Sensitive files
+service-account-key.json
+*.pdf

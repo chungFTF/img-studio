@@ -59,6 +59,7 @@ const { palette } = theme
 
 import { useAppContext } from '../../context/app-context'
 import { generateImage } from '../../api/imagen/action'
+import { generateImageWithGemini } from '../../api/gemini-image/action'
 import {
   chipGroupFieldsI,
   GenerateImageFormFields,
@@ -236,6 +237,11 @@ export default function GenerateForm({
 
     if (currentModel.includes('veo-2.0')) setValue('resolution', '720p')
     else if (currentModel.includes('veo-3.0')) setValue('resolution', '1080p')
+
+    // Gemini models only support 1 image per request
+    if (currentModel.includes('gemini')) {
+      setValue('sampleCount', '1')
+    }
   }, [currentModel, isAdvancedFeaturesAvailable, isOnlyITVavailable, setValue])
 
   // Populates the prompt field from the library's initial prompt.
@@ -385,32 +391,55 @@ export default function GenerateForm({
     onRequestSent(true, parseInt(formData.sampleCount))
 
     try {
-      const areAllRefValid = formData['referenceObjects'].every(
-        (reference) =>
-          reference.base64Image !== '' &&
-          reference.description !== '' &&
-          reference.refId !== null &&
-          reference.referenceType !== ''
-      )
-      if (hasReferences && !areAllRefValid)
-        throw Error('Incomplete reference(s) information provided, either image type or description missing.')
+      // Check if using Gemini model for image generation
+      const isGeminiModel = formData.modelVersion.includes('gemini')
 
-      if (hasReferences && areAllRefValid) setIsGeminiRewrite(false)
+      if (isGeminiModel) {
+        // Use Gemini native image generation
+        const geminiFormData = {
+          prompt: formData.prompt,
+          modelVersion: formData.modelVersion,
+          sampleCount: formData.sampleCount,
+          aspectRatio: formData.aspectRatio,
+          negativePrompt: formData.negativePrompt,
+        }
 
-      const newGeneratedImages = await generateImage(formData, areAllRefValid, isGeminiRewrite, appContext)
+        const newGeneratedImages = await generateImageWithGemini(geminiFormData, appContext)
 
-      if (newGeneratedImages !== undefined && typeof newGeneratedImages === 'object' && 'error' in newGeneratedImages) {
-        let errorMsg = newGeneratedImages['error'].replaceAll('Error: ', '')
-
-        errorMsg = manageModelNotFoundError(errorMsg, generationFields.model.options as ModelOption[])
-
-        throw Error(errorMsg)
+        if (typeof newGeneratedImages === 'object' && 'error' in newGeneratedImages) {
+          let errorMsg = newGeneratedImages['error'].replaceAll('Error: ', '')
+          errorMsg = manageModelNotFoundError(errorMsg, generationFields.model.options as ModelOption[])
+          throw Error(errorMsg)
+        } else {
+          onImageGeneration && onImageGeneration(newGeneratedImages)
+        }
       } else {
-        newGeneratedImages.map((image) => {
-          if ('warning' in image) onNewErrorMsg(image['warning'] as string)
-        })
+        // Use Imagen for image generation
+        const areAllRefValid = formData['referenceObjects'].every(
+          (reference) =>
+            reference.base64Image !== '' &&
+            reference.description !== '' &&
+            reference.refId !== null &&
+            reference.referenceType !== ''
+        )
+        if (hasReferences && !areAllRefValid)
+          throw Error('Incomplete reference(s) information provided, either image type or description missing.')
 
-        onImageGeneration && onImageGeneration(newGeneratedImages)
+        if (hasReferences && areAllRefValid) setIsGeminiRewrite(false)
+
+        const newGeneratedImages = await generateImage(formData, areAllRefValid, isGeminiRewrite, appContext)
+
+        if (newGeneratedImages !== undefined && typeof newGeneratedImages === 'object' && 'error' in newGeneratedImages) {
+          let errorMsg = newGeneratedImages['error'].replaceAll('Error: ', '')
+          errorMsg = manageModelNotFoundError(errorMsg, generationFields.model.options as ModelOption[])
+          throw Error(errorMsg)
+        } else {
+          newGeneratedImages.map((image) => {
+            if ('warning' in image) onNewErrorMsg(image['warning'] as string)
+          })
+
+          onImageGeneration && onImageGeneration(newGeneratedImages)
+        }
       }
     } catch (error: any) {
       onNewErrorMsg(error.toString())
@@ -554,7 +583,7 @@ export default function GenerateForm({
                 <AudioSwitch checked={isVideoWithAudio} onChange={handleVideoAudioCheck} />
               </CustomTooltip>
             )}
-            {currentModel.includes('imagen') && !hasReferences && (
+            {currentModel.includes('imagen') && !hasReferences && !currentModel.includes('gemini') && (
               <CustomTooltip title="Have Gemini enhance your prompt" size="small">
                 <GeminiSwitch checked={isGeminiRewrite} onChange={handleGeminiRewrite} />
               </CustomTooltip>
@@ -569,7 +598,7 @@ export default function GenerateForm({
               {'Generate'}
             </Button>
           </Stack>
-          {generationType === 'Image' && process.env.NEXT_PUBLIC_EDIT_ENABLED === 'true' && (
+          {generationType === 'Image' && process.env.NEXT_PUBLIC_EDIT_ENABLED === 'true' && !currentModel.includes('gemini') && (
             <Accordion
               disableGutters
               expanded={expanded === 'references'}
