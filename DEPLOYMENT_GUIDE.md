@@ -28,14 +28,12 @@ gcloud services enable compute.googleapis.com
 | Imagen 4 (imagen-4.0-generate-001) | Public Preview |
 | Imagen 3 Editing (imagen-3.0-capability-001) | 需申請 |
 | Image Segmentation (image-segmentation-001) | 需申請 |
-| Veo 3.1 (veo-3.1-generate-001) | Public GA |
-| Veo 3.1 Fast (veo-3.1-fast-generate-001) | Public GA |
-| Veo 3.1 Preview (veo-3.1-generate-preview) | Preview |
-| Veo 3.1 Fast Preview (veo-3.1-fast-generate-preview) | Preview |
+| Veo 3.1 (veo-3.1-generate-001) | GA |
+| Veo 3.1 Fast (veo-3.1-fast-generate-001) | GA |
 | Veo 2 (veo-2.0-generate-001) | Public GA |
 | Gemini 2.0 Flash (gemini-2.0-flash-exp) | Public |
 | Gemini 2.5 Flash Image (gemini-2.5-flash-image) | Public |
-| Gemini 3 Pro Image (gemini-3-pro-image-preview) | Preview |
+| Gemini 3 Pro Image (gemini-3-pro-image-preview) | Preview (Global endpoint) |
 
 ---
 
