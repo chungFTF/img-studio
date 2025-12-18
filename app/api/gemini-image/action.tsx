@@ -53,14 +53,19 @@ export async function generateImageWithGemini(
   }
 
   const projectId = process.env.NEXT_PUBLIC_PROJECT_ID
-  // Gemini image generation models are only available in us-central1
-  const location = 'us-central1'
-  
-  // Use the model version directly (already correct in generate-image-utils)
   const modelVersion = formData.modelVersion || 'gemini-2.0-flash-exp'
-
-  // Gemini API endpoint for generateContent
-  const geminiAPIUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelVersion}:generateContent`
+  
+  // Determine the correct location and endpoint
+  // gemini-3-pro-image-preview requires global endpoint (not regional)
+  const isGlobalEndpointRequired = modelVersion === 'gemini-3-pro-image-preview'
+  const location = isGlobalEndpointRequired ? 'global' : 'us-central1'
+  
+  // Build the correct API endpoint
+  const baseUrl = isGlobalEndpointRequired 
+    ? 'https://aiplatform.googleapis.com'
+    : `https://${location}-aiplatform.googleapis.com`
+  
+  const geminiAPIUrl = `${baseUrl}/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelVersion}:generateContent`
 
   // 3 - Build request with responseModalities for image generation
   const sampleCount = parseInt(formData.sampleCount) || 1
@@ -106,8 +111,11 @@ export async function generateImageWithGemini(
     fullPrompt = `${fullPrompt}. Avoid: ${formData.negativePrompt}`
   }
 
-  // Add aspect ratio instruction to prompt
-  if (formData.aspectRatio && formData.aspectRatio !== '1:1') {
+  // Check if using new image models (aspect ratio handled in API config)
+  const isNewImageModel = formData.modelVersion === 'gemini-2.5-flash-image' || formData.modelVersion === 'gemini-3-pro-image-preview'
+  
+  // Add aspect ratio instruction to prompt only for old API
+  if (!isNewImageModel && formData.aspectRatio && formData.aspectRatio !== '1:1') {
     fullPrompt = `${fullPrompt}. Generate in ${formData.aspectRatio} aspect ratio.`
   }
 
@@ -121,7 +129,10 @@ export async function generateImageWithGemini(
     if (i > 0) {
       await new Promise((resolve) => setTimeout(resolve, 2000)) // 2 second delay
     }
-    const reqData = {
+    // Use different API format for new Gemini image models
+    const isNewImageModel = modelVersion === 'gemini-2.5-flash-image' || modelVersion === 'gemini-3-pro-image-preview'
+    
+    const reqData: any = {
       contents: [
         {
           role: 'user',
@@ -132,10 +143,30 @@ export async function generateImageWithGemini(
           ],
         },
       ],
-      generationConfig: {
+    }
+
+    if (isNewImageModel) {
+      // New image_config API for gemini-2.5-flash-image and gemini-3-pro-image-preview
+      reqData.generationConfig = {
+        temperature: 1.0,
+      }
+      
+      const imageConfig: any = {
+        aspect_ratio: formData.aspectRatio || '1:1',
+      }
+      
+      // gemini-3-pro-image-preview supports image_size parameter
+      if (modelVersion === 'gemini-3-pro-image-preview') {
+        imageConfig.image_size = '2K' // Can be '2K' or '4K'
+      }
+      
+      reqData.generationConfig.image_config = imageConfig
+    } else {
+      // Old responseModalities API for gemini-2.0-flash-exp
+      reqData.generationConfig = {
         responseModalities: ['IMAGE', 'TEXT'],
         temperature: 1.0,
-      },
+      }
     }
 
     const opts = {
@@ -264,10 +295,19 @@ export async function editImageWithGemini(
   }
 
   const projectId = process.env.NEXT_PUBLIC_PROJECT_ID
-  const location = 'us-central1' // Gemini image generation only in us-central1
   const modelVersion = formData.modelVersion || 'gemini-2.0-flash-exp'
-
-  const geminiAPIUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelVersion}:generateContent`
+  
+  // Determine the correct location and endpoint
+  // gemini-3-pro-image-preview requires global endpoint (not regional)
+  const isGlobalEndpointRequired = modelVersion === 'gemini-3-pro-image-preview'
+  const location = isGlobalEndpointRequired ? 'global' : 'us-central1'
+  
+  // Build the correct API endpoint
+  const baseUrl = isGlobalEndpointRequired 
+    ? 'https://aiplatform.googleapis.com'
+    : `https://${location}-aiplatform.googleapis.com`
+  
+  const geminiAPIUrl = `${baseUrl}/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelVersion}:generateContent`
 
   // 3 - Prepare the image data
   const editGcsURI = `${appContext.gcsURI}/${appContext.userID}/edited-images`
