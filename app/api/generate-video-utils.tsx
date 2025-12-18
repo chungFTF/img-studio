@@ -51,8 +51,28 @@ export const GenerateVideoFormFields = {
   },
   modelVersion: {
     type: 'select',
-    default: 'veo-3.0-generate-preview',
+    default: 'veo-3.1-generate-001',
     options: [
+      {
+        value: 'veo-3.1-generate-001',
+        label: 'Veo 3.1',
+        indication: 'Latest GA model: Text-to-video & Image-to-video + Audio',
+      },
+      {
+        value: 'veo-3.1-fast-generate-001',
+        label: 'Veo 3.1 Fast',
+        indication: 'Low latency GA model: Text-to-video + Audio',
+      },
+      {
+        value: 'veo-3.1-generate-preview',
+        label: 'Veo 3.1 Preview',
+        indication: 'Preview model: Text-to-video & Image-to-video + Audio',
+      },
+      {
+        value: 'veo-3.1-fast-generate-preview',
+        label: 'Veo 3.1 Fast Preview',
+        indication: 'Low latency preview model: Text-to-video + Audio',
+      },
       {
         value: 'veo-3.0-generate-preview',
         label: 'Veo 3',
