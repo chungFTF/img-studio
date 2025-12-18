@@ -65,12 +65,12 @@ export const EditImageFormFields = {
         indication: 'Requires access approval',
       },
       {
-        value: 'gemini-2.0-flash-exp',
+        value: 'gemini-2.0-flash',
         label: 'Gemini 2.0 Flash (Nano Banana)',
         indication: 'Text-based editing (no mask required)',
       },
       {
-        value: 'gemini-2.5-flash-image',
+        value: 'gemini-3-pro-image-preview',
         label: 'Gemini 2.5 Flash (Nano Banana Pro)',
         indication: 'Text-based editing (no mask required)',
       },
