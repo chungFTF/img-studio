@@ -43,6 +43,44 @@ export async function decomposeUri(uri: string) {
   }
 }
 
+// List all files from GCS bucket
+export async function listFilesFromGCS(prefix?: string) {
+  const storage = new Storage({ projectId })
+  const bucketName = process.env.NEXT_PUBLIC_OUTPUT_BUCKET
+
+  if (!bucketName) {
+    return {
+      error: 'Output bucket not configured',
+      files: [],
+    }
+  }
+
+  try {
+    const [files] = await storage.bucket(bucketName).getFiles({
+      prefix: prefix || '',
+    })
+
+    const fileList = files.map((file: any) => ({
+      name: file.name,
+      size: file.metadata.size,
+      updated: file.metadata.updated,
+      contentType: file.metadata.contentType,
+      gcsUri: `gs://${bucketName}/${file.name}`,
+    }))
+
+    return {
+      files: fileList,
+      bucket: bucketName,
+    }
+  } catch (error) {
+    console.error('Error listing files from GCS:', error)
+    return {
+      error: 'Failed to list files from GCS',
+      files: [],
+    }
+  }
+}
+
 export async function getSignedURL(gcsURI: string) {
   const { bucketName, fileName } = await decomposeUri(gcsURI)
 
