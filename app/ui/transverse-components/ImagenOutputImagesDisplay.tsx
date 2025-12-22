@@ -37,6 +37,8 @@ import { ImageI } from '../../api/generate-image-utils'
 import { CustomizedAvatarButton, CustomizedIconButton } from '../ux-components/Button-SX'
 import ExportStepper, { downloadBase64Media } from './ExportDialog'
 import DownloadDialog from './DownloadDialog'
+import { ImageGenerationLoading } from '../ux-components/LoadingAnimation'
+import GenerationMetadataDisplay from '../ux-components/GenerationMetadataDisplay'
 
 import theme from '../../theme'
 import { blurDataURL } from '../ux-components/BlurImage'
@@ -103,7 +105,17 @@ export default function OutputImagesDisplay({
     <>
       <Box sx={{ height: '79vh', maxHeight: 650, width: '90%' }}>
         {isLoading ? (
-          <Skeleton variant="rounded" width={450} height={450} sx={{ mt: 2, bgcolor: palette.primary.light }} />
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              width: '100%',
+            }}
+          >
+            <ImageGenerationLoading sampleCount={generatedCount} />
+          </Box>
         ) : (
           <ImageList
             cols={generatedCount > 1 ? 2 : 1}
@@ -250,6 +262,13 @@ export default function OutputImagesDisplay({
               ) : null
             )}
           </ImageList>
+        )}
+        
+        {/* Display metadata once below all images */}
+        {!isLoading && generatedImagesInGCS.length > 0 && generatedImagesInGCS[0]?.metadata && (
+          <Box sx={{ mt: 2, px: 2 }}>
+            <GenerationMetadataDisplay metadata={generatedImagesInGCS[0].metadata} />
+          </Box>
         )}
       </Box>
       {imageFullScreen !== undefined && (

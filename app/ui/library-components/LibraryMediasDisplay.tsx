@@ -45,6 +45,7 @@ import { CustomizedIconButton } from '../ux-components/Button-SX'
 import ExploreDialog from './ExploreDialog'
 import { CustomWhiteTooltip } from '../ux-components/Tooltip'
 import { VideoI } from '@/app/api/generate-video-utils'
+import LoadingAnimation from '../ux-components/LoadingAnimation'
 const { palette } = theme
 
 const CustomizedNavButtons = {
@@ -261,7 +262,17 @@ export default function LibraryMediasDisplay({
     <>
       <Box sx={{ maxHeight: '100vh', width: '100%', overflowY: 'scroll' }}>
         {isMediasLoading ? (
-          <Skeleton variant="rounded" width={'100%'} height={500} sx={{ mt: 2, bgcolor: palette.primary.light }} />
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: 500,
+              width: '100%',
+            }}
+          >
+            <LoadingAnimation message="Loading library..." type="circular" icon="default" size="large" />
+          </Box>
         ) : (
           <>
             {currentPageImages !== undefined && currentPageImages.length !== 0 && (

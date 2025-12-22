@@ -35,6 +35,8 @@ import {
 import { VideoI } from '../../api/generate-video-utils'
 import { CustomizedAvatarButton, CustomizedIconButton } from '../ux-components/Button-SX'
 import ExportStepper, { downloadBase64Media } from './ExportDialog'
+import { VideoGenerationLoading } from '../ux-components/LoadingAnimation'
+import GenerationMetadataDisplay from '../ux-components/GenerationMetadataDisplay'
 
 import theme from '../../theme'
 import { CustomWhiteTooltip } from '../ux-components/Tooltip'
@@ -105,7 +107,17 @@ export default function OutputVideosDisplay({
         }}
       >
         {isLoading ? (
-          <Skeleton variant="rounded" width={450} height={450} sx={{ mt: 2, bgcolor: palette.primary.light }} />
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              height: '100%',
+              width: '100%',
+            }}
+          >
+            <VideoGenerationLoading sampleCount={generatedCount} />
+          </Box>
         ) : (
           <ImageList
             cols={generatedCount > 1 ? 2 : 1}
@@ -229,6 +241,13 @@ export default function OutputVideosDisplay({
               ) : null
             )}
           </ImageList>
+        )}
+        
+        {/* Display metadata once below all videos */}
+        {!isLoading && generatedVideosInGCS.length > 0 && generatedVideosInGCS[0]?.metadata && (
+          <Box sx={{ mt: 2, px: 2 }}>
+            <GenerationMetadataDisplay metadata={generatedVideosInGCS[0].metadata} />
+          </Box>
         )}
       </Box>
 
