@@ -80,8 +80,20 @@ export const GenerateImageFormFields = {
   },
   modelVersion: {
     type: 'select',
-    default: 'imagen-4.0-generate-001',
+    default: 'gemini-2.5-flash-image',
     options: [
+      {
+        value: 'gemini-2.5-flash-image',
+        label: 'Gemini 2.5 Flash (Nano Banana)',
+        indication: 'Gemini native image generation with text rendering',
+        type: 'gemini',
+      },
+      {
+        value: 'gemini-3-pro-image-preview',
+        label: 'Gemini 3 Pro (Nano Banana Pro Preview)',
+        indication: 'Preview model with enhanced quality (requires project access)',
+        type: 'gemini',
+      },
       {
         value: 'imagen-4.0-generate-001',
         label: 'Imagen 4',
@@ -96,18 +108,6 @@ export const GenerateImageFormFields = {
         value: 'imagen-4.0-fast-generate-001',
         label: 'Imagen 4 - Fast',
         indication: 'Low latency model version',
-      },
-      {
-        value: 'gemini-2.5-flash-image',
-        label: 'Gemini 2.5 Flash (Nano Banana)',
-        indication: 'Gemini native image generation with text rendering',
-        type: 'gemini',
-      },
-      {
-        value: 'gemini-3-pro-image-preview',
-        label: 'Gemini 3 Pro (Nano Banana Pro Preview)',
-        indication: 'Preview model with enhanced quality (requires project access)',
-        type: 'gemini',
       },
     ],
     isDataResetable: false,
@@ -536,6 +536,24 @@ export interface ImageI {
   author: string
   modelVersion: string
   mode: string
+  // Performance metadata
+  metadata?: {
+    tokensUsed?: number
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    executionTimeMs?: number
+    startTime?: string
+    endTime?: string
+    estimatedCost?: number
+    parameters?: Record<string, any>
+    perImageTokens?: Array<{
+      imageIndex: number
+      promptTokens: number
+      candidatesTokens: number
+      totalTokens: number
+    }>
+  }
 }
 
 // List of Imagen available ratio and their corresponding generation dimentions

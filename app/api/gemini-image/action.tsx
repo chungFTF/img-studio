@@ -35,6 +35,10 @@ export async function generateImageWithGemini(
   formData: GenerateImageFormI,
   appContext: appContextDataI | null
 ): Promise<ImageI[] | { error: string }> {
+  // Track performance
+  const startTime = new Date().toISOString()
+  const startMs = Date.now()
+  
   // 1 - Authenticate to Google Cloud
   let client
   try {
@@ -74,6 +78,19 @@ export async function generateImageWithGemini(
   const bucketName = generationGcsURI.replace('gs://', '').split('/')[0]
   const uniqueFolderId = generateUniqueFolderId()
   const folderName = generationGcsURI.split(bucketName + '/')[1] + '/' + uniqueFolderId
+  
+  // Track cumulative token usage across all samples
+  let totalPromptTokens = 0
+  let totalCandidatesTokens = 0
+  let totalAllTokens = 0
+  
+  // Track per-image token usage
+  const perImageTokens: Array<{
+    imageIndex: number
+    promptTokens: number
+    candidatesTokens: number
+    totalTokens: number
+  }> = []
 
   // Build prompt with style attributes (same as Imagen)
   let fullPrompt = formData.prompt
@@ -84,14 +101,14 @@ export async function generateImageWithGemini(
   }
 
   // Add additional parameters (light, perspective, colors, etc.)
-  let parameters = ''
+  let promptParameters = ''
   imageGenerationUtils.fullPromptFields.forEach((additionalField) => {
     const fieldValue = formData[additionalField as keyof GenerateImageFormI]
     if (fieldValue && typeof fieldValue === 'string' && fieldValue !== '') {
-      parameters += ` ${fieldValue} ${String(additionalField).replaceAll('_', ' ')}, `
+      promptParameters += ` ${fieldValue} ${String(additionalField).replaceAll('_', ' ')}, `
     }
   })
-  if (parameters !== '') fullPrompt = `${fullPrompt}, ${parameters}`
+  if (promptParameters !== '') fullPrompt = `${fullPrompt}, ${promptParameters}`
 
   // Add quality modifiers based on use_case
   let quality_modifiers = ''
@@ -178,6 +195,36 @@ export async function generateImageWithGemini(
     try {
       const res = await client.request(opts)
 
+      // Log complete API response structure
+      console.log('🔍 Gemini API Response Structure:', {
+        hasCandidates: !!res.data?.candidates,
+        hasUsageMetadata: !!res.data?.usageMetadata,
+        responseKeys: Object.keys(res.data || {}),
+      })
+
+      // Extract and log usage metadata
+      if (res.data?.usageMetadata) {
+        const usage = res.data.usageMetadata
+        console.log(`💰 Gemini Usage Metadata (Image ${i + 1}/${sampleCount}):`, {
+          promptTokenCount: usage.promptTokenCount,
+          candidatesTokenCount: usage.candidatesTokenCount,
+          totalTokenCount: usage.totalTokenCount,
+        })
+        
+        // Store per-image token usage
+        perImageTokens.push({
+          imageIndex: i + 1,
+          promptTokens: usage.promptTokenCount || 0,
+          candidatesTokens: usage.candidatesTokenCount || 0,
+          totalTokens: usage.totalTokenCount || 0,
+        })
+        
+        // Accumulate token usage
+        totalPromptTokens += usage.promptTokenCount || 0
+        totalCandidatesTokens += usage.candidatesTokenCount || 0
+        totalAllTokens += usage.totalTokenCount || 0
+      }
+
       if (!res.data?.candidates?.[0]?.content?.parts) {
         console.error('No valid response from Gemini:', res.data)
         continue
@@ -261,7 +308,99 @@ export async function generateImageWithGemini(
     return { error: 'No images were generated. Please try a different prompt.' }
   }
 
-  return generatedImages
+  // Calculate execution time and prepare metadata
+  const endTime = new Date().toISOString()
+  const executionTimeMs = Date.now() - startMs
+  
+  // Calculate cost estimation for Gemini (only if we have actual token data)
+  let totalEstimatedCost: number | undefined = undefined
+  if (totalAllTokens > 0) {
+    // Pricing: ~$0.04 per image + ~$0.50 per 1M tokens
+    const imageGenerationCost = generatedImages.length * 0.04
+    const tokenCost = (totalAllTokens / 1000000) * 0.5
+    totalEstimatedCost = imageGenerationCost + tokenCost
+  }
+  
+  // Build parameters object with only selected values
+  const parameters: Record<string, any> = {
+    model: modelVersion,
+    aspectRatio: formData.aspectRatio,
+    sampleCount: formData.sampleCount,
+  }
+  
+  if (formData.style) parameters.primaryStyle = formData.style
+  if (formData.secondary_style) parameters.secondaryStyle = formData.secondary_style
+  if (formData.light) parameters.lighting = formData.light
+  if (formData.light_coming_from) parameters.lightOrigin = formData.light_coming_from
+  if (formData.perspective) parameters.perspective = formData.perspective
+  if (formData.shot_from) parameters.viewAngle = formData.shot_from
+  if (formData.image_colors) parameters.colors = formData.image_colors
+  if (formData.personGeneration) parameters.personGeneration = formData.personGeneration
+  if (formData.negativePrompt) parameters.negativePrompt = formData.negativePrompt
+  if (formData.seedNumber) parameters.seedNumber = formData.seedNumber
+  parameters.prompt = fullPrompt.substring(0, 150) + '...'
+  
+  // Only include metadata with actual data
+  const generationMetadata: any = {
+    executionTimeMs,
+    startTime,
+    endTime,
+    parameters,
+  }
+  
+  // Add token data only if we got it from the API
+  if (totalAllTokens > 0) {
+    generationMetadata.tokensUsed = totalAllTokens
+    generationMetadata.inputTokens = totalPromptTokens
+    generationMetadata.outputTokens = totalCandidatesTokens
+    generationMetadata.totalTokens = totalAllTokens
+    generationMetadata.perImageTokens = perImageTokens // Add per-image breakdown
+  }
+  
+  // Add cost only if calculated
+  if (totalEstimatedCost !== undefined) {
+    generationMetadata.estimatedCost = totalEstimatedCost
+  }
+  
+  const logData: any = {
+    model: modelVersion,
+    executionTime: `${(executionTimeMs / 1000).toFixed(2)}s`,
+    imageCount: generatedImages.length,
+  }
+  
+  if (totalAllTokens > 0) {
+    logData.tokens = {
+      input: totalPromptTokens,
+      output: totalCandidatesTokens,
+      total: totalAllTokens,
+    }
+    logData.tokenSource = 'API usageMetadata'
+  }
+  
+  if (totalEstimatedCost !== undefined && totalEstimatedCost > 0) {
+    logData.estimatedCost = `$${totalEstimatedCost.toFixed(4)}`
+    
+    // Show cost breakdown
+    if (totalAllTokens > 0) {
+      const imagesCost = generatedImages.length * 0.04
+      const tokensCost = (totalAllTokens / 1000000) * 0.5
+      logData.costBreakdown = {
+        images: `$${imagesCost.toFixed(4)} (${generatedImages.length} × $0.04)`,
+        tokens: `$${tokensCost.toFixed(6)} (${totalAllTokens.toLocaleString()} × $0.50/1M)`,
+        total: `$${totalEstimatedCost.toFixed(4)}`
+      }
+    }
+  }
+  
+  console.log('🎨 Gemini Image Generation Complete:', logData)
+  
+  // Add metadata to all generated images
+  const imagesWithMetadata = generatedImages.map(img => ({
+    ...img,
+    metadata: generationMetadata,
+  }))
+
+  return imagesWithMetadata
 }
 
 // Gemini Image Editing - uses text instructions instead of masks
@@ -271,12 +410,18 @@ export interface GeminiEditFormI {
   sampleCount: string
   inputImage: string // base64 encoded image
   negativePrompt?: string
+  width?: number
+  height?: number
 }
 
 export async function editImageWithGemini(
   formData: GeminiEditFormI,
   appContext: appContextDataI | null
 ): Promise<ImageI[] | { error: string }> {
+  // Track performance
+  const startTime = new Date().toISOString()
+  const startMs = Date.now()
+  
   // 1 - Authenticate to Google Cloud
   let client
   try {
@@ -332,56 +477,102 @@ export async function editImageWithGemini(
     editPrompt = `${editPrompt} Avoid: ${formData.negativePrompt}`
   }
 
-  // 4 - Build request
-  const reqData = {
-    contents: [
-      {
-        role: 'user',
-        parts: [
-          {
-            text: editPrompt,
-          },
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Image,
-            },
-          },
-        ],
-      },
-    ],
-    generationConfig: {
-      responseModalities: ['IMAGE', 'TEXT'],
-      temperature: 1.0,
-    },
-  }
-
-  const opts = {
-    url: geminiAPIUrl,
-    method: 'POST',
-    data: reqData,
-  }
-
   const generatedImages: ImageI[] = []
+  let tokenUsage: any = {}
+  
+  // Track cumulative token usage
+  let totalPromptTokens = 0
+  let totalCandidatesTokens = 0
+  let totalAllTokens = 0
+  
+  // Track per-image token usage
+  const perImageTokens: Array<{
+    imageIndex: number
+    promptTokens: number
+    candidatesTokens: number
+    totalTokens: number
+  }> = []
 
-  try {
-    const res = await client.request(opts)
-
-    if (!res.data?.candidates?.[0]?.content?.parts) {
-      console.error('No valid response from Gemini:', res.data)
-      return { error: 'No valid response from Gemini.' }
+  // Support multiple sample count (like generation)
+  const sampleCount = Math.min(parseInt(formData.sampleCount) || 1, 4)
+  
+  // Generate multiple edited images
+  for (let i = 0; i < sampleCount; i++) {
+    // Add delay between requests to avoid rate limiting
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
     }
 
-    const parts = res.data.candidates[0].content.parts
+    // 4 - Build request
+    const reqData = {
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            {
+              text: editPrompt,
+            },
+            {
+              inlineData: {
+                mimeType: mimeType,
+                data: base64Image,
+              },
+            },
+          ],
+        },
+      ],
+      generationConfig: {
+        responseModalities: ['IMAGE', 'TEXT'],
+        temperature: 1.0,
+      },
+    }
 
-    // Find the image part in the response
-    let imageIndex = 0
-    for (const part of parts) {
+    const opts = {
+      url: geminiAPIUrl,
+      method: 'POST',
+      data: reqData,
+    }
+
+    try {
+      const res = await client.request(opts)
+
+      // Extract and log usage metadata
+      if (res.data?.usageMetadata) {
+        const usage = res.data.usageMetadata
+        console.log(`💰 Gemini Edit Usage Metadata (Image ${i + 1}/${sampleCount}):`, {
+          promptTokenCount: usage.promptTokenCount,
+          candidatesTokenCount: usage.candidatesTokenCount,
+          totalTokenCount: usage.totalTokenCount,
+        })
+        
+        // Store per-image token usage
+        perImageTokens.push({
+          imageIndex: i + 1,
+          promptTokens: usage.promptTokenCount || 0,
+          candidatesTokens: usage.candidatesTokenCount || 0,
+          totalTokens: usage.totalTokenCount || 0,
+        })
+        
+        // Accumulate token usage
+        totalPromptTokens += usage.promptTokenCount || 0
+        totalCandidatesTokens += usage.candidatesTokenCount || 0
+        totalAllTokens += usage.totalTokenCount || 0
+      }
+
+      if (!res.data?.candidates?.[0]?.content?.parts) {
+        console.error('No valid response from Gemini:', res.data)
+        continue
+      }
+
+      const parts = res.data.candidates[0].content.parts
+
+      // Find the image part in the response
+      for (const part of parts) {
       if (part.inlineData?.mimeType?.startsWith('image/')) {
         const responseBase64 = part.inlineData.data
         const responseMimeType = part.inlineData.mimeType
         const format = responseMimeType.replace('image/', '').toUpperCase()
-        const fileName = `sample_${imageIndex}.${format.toLowerCase()}`
+        const fileName = `sample_${i}.${format.toLowerCase()}`
         const fullObjectName = `${folderName}/${fileName}`
 
         // Upload to GCS
@@ -410,8 +601,8 @@ export async function editImageWithGemini(
           gcsUri: imageGcsUri,
           format: format,
           prompt: formData.prompt,
-          altText: `Gemini edited image ${imageIndex}`,
-          key: `${uniqueFolderId}_${imageIndex}`,
+          altText: `Gemini edited image ${i}`,
+          key: `${uniqueFolderId}_${i}`,
           width: 1024, // Gemini typically outputs around 1024px
           height: 1024,
           ratio: '1:1', // Gemini maintains original ratio
@@ -422,23 +613,104 @@ export async function editImageWithGemini(
         }
 
         generatedImages.push(imageResult)
-        imageIndex++
+        break // Only take first image from each response
       }
     }
-  } catch (error: any) {
-    console.error('Error editing image:', error.response?.data || error.message || error)
+    } catch (error: any) {
+      console.error(`Error editing image ${i + 1}/${sampleCount}:`, error.response?.data || error.message || error)
 
-    if (error.response?.status === 429) {
-      return { error: 'Rate limit exceeded. Please try again later.' }
+      if (error.response?.status === 429) {
+        return { error: 'Rate limit exceeded. Please try again later.' }
+      }
+      // Continue to next iteration on other errors
     }
-
-    return { error: `Error editing image: ${error.message || 'Unknown error'}` }
   }
 
   if (generatedImages.length === 0) {
     return { error: 'No edited images were generated. Please try a different prompt.' }
   }
 
-  return generatedImages
-}
+  // Calculate execution time and prepare metadata
+  const endTime = new Date().toISOString()
+  const executionTimeMs = Date.now() - startMs
+  
+  // Calculate cost estimation for Gemini (only if we have actual token data)
+  let totalEstimatedCost: number | undefined = undefined
+  if (totalAllTokens > 0) {
+    const imageEditCost = generatedImages.length * 0.04
+    const tokenCost = (totalAllTokens / 1000000) * 0.5
+    totalEstimatedCost = imageEditCost + tokenCost
+  }
+  
+  // Build parameters object
+  const editParameters: Record<string, any> = {
+    model: modelVersion,
+    editType: 'Text-based edit',
+    sampleCount: sampleCount.toString(),
+  }
+  
+  if (formData.width && formData.height) {
+    editParameters.originalSize = `${formData.width}x${formData.height}`
+  }
+  if (formData.negativePrompt) {
+    editParameters.negativePrompt = formData.negativePrompt
+  }
+  editParameters.prompt = formData.prompt.substring(0, 150) + '...'
+  
+  const editMetadata: any = {
+    executionTimeMs,
+    startTime,
+    endTime,
+    parameters: editParameters,
+  }
+  
+  // Add token data only if available from API
+  if (totalAllTokens > 0) {
+    editMetadata.tokensUsed = totalAllTokens
+    editMetadata.inputTokens = totalPromptTokens
+    editMetadata.outputTokens = totalCandidatesTokens
+    editMetadata.totalTokens = totalAllTokens
+    editMetadata.perImageTokens = perImageTokens // Add per-image breakdown
+  }
+  
+  // Add cost only if calculated
+  if (totalEstimatedCost !== undefined) {
+    editMetadata.estimatedCost = totalEstimatedCost
+  }
+  
+  const logData: any = {
+    model: modelVersion,
+    executionTime: `${(executionTimeMs / 1000).toFixed(2)}s`,
+    imageCount: generatedImages.length,
+  }
+  
+  if (totalAllTokens > 0) {
+    logData.tokens = {
+      input: totalPromptTokens,
+      output: totalCandidatesTokens,
+      total: totalAllTokens,
+    }
+    logData.tokenSource = 'API usageMetadata'
+    
+    if (totalEstimatedCost !== undefined && totalEstimatedCost > 0) {
+      logData.estimatedCost = `$${totalEstimatedCost.toFixed(4)}`
+      const imagesCost = generatedImages.length * 0.04
+      const tokensCost = (totalAllTokens / 1000000) * 0.5
+      logData.costBreakdown = {
+        images: `$${imagesCost.toFixed(4)} (${generatedImages.length} × $0.04)`,
+        tokens: `$${tokensCost.toFixed(6)} (${totalAllTokens.toLocaleString()} × $0.50/1M)`,
+        total: `$${totalEstimatedCost.toFixed(4)}`
+      }
+    }
+  }
+  
+  console.log('✏️ Gemini Image Edit Complete:', logData)
+  
+  // Add metadata to all edited images
+  const imagesWithMetadata = generatedImages.map(img => ({
+    ...img,
+    metadata: editMetadata,
+  }))
 
+  return imagesWithMetadata
+}

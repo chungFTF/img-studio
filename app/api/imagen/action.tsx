@@ -143,6 +143,7 @@ export async function buildImageListFromURI({
   userID,
   modelVersion,
   mode,
+  metadata,
 }: {
   imagesInGCS: ImagenModelResultI[]
   aspectRatio: string
@@ -152,6 +153,16 @@ export async function buildImageListFromURI({
   userID: string
   modelVersion: string
   mode: string
+  metadata?: {
+    tokensUsed?: number
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    executionTimeMs?: number
+    startTime?: string
+    endTime?: string
+    parameters?: Record<string, any>
+  }
 }) {
   const promises = imagesInGCS.map(async (image) => {
     if ('raiFilteredReason' in image) {
@@ -195,6 +206,7 @@ export async function buildImageListFromURI({
             author: userID,
             modelVersion: modelVersion,
             mode: mode,
+            metadata: metadata,
           }
         }
       } catch (error) {
@@ -223,6 +235,7 @@ export async function buildImageListFromBase64({
   userID,
   modelVersion,
   mode,
+  metadata,
 }: {
   imagesBase64: ImagenModelResultI[]
   targetGcsURI: string
@@ -233,6 +246,16 @@ export async function buildImageListFromBase64({
   userID: string
   modelVersion: string
   mode: string
+  metadata?: {
+    tokensUsed?: number
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    executionTimeMs?: number
+    startTime?: string
+    endTime?: string
+    parameters?: Record<string, any>
+  }
 }) {
   const bucketName = targetGcsURI.replace('gs://', '').split('/')[0]
   let uniqueFolderId = generateUniqueFolderId()
@@ -289,6 +312,7 @@ export async function buildImageListFromBase64({
             author: userID,
             modelVersion: modelVersion,
             mode: mode,
+            metadata: metadata,
           }
         }
       } catch (error) {
@@ -313,6 +337,10 @@ export async function generateImage(
   isGeminiRewrite: boolean,
   appContext: appContextDataI | null
 ) {
+  // Track performance
+  const startTime = new Date().toISOString()
+  const startMs = Date.now()
+
   // 1 - Atempting to authent to Google Cloud & fetch project informations
   let client
   try {
@@ -449,6 +477,14 @@ export async function generateImage(
   try {
     const res = await client.request(opts)
 
+    // Log API response structure for debugging
+    console.log('🔍 Imagen API Response Structure:', {
+      hasData: !!res.data,
+      hasPredictions: !!res.data?.predictions,
+      hasMetadata: !!res.data?.metadata,
+      predictionCount: res.data?.predictions?.length || 0,
+    })
+
     if (res.data.predictions === undefined) throw Error('There were an issue, no images were generated')
 
     // NO images at all were generated out of all samples
@@ -458,6 +494,53 @@ export async function generateImage(
     const usedRatio = RatioToPixel.find((item) => item.ratio === opts.data.parameters.aspectRatio)
 
     const resultImages: ImagenModelResultI[] = res.data.predictions
+
+    // Calculate execution time and prepare metadata
+    const endTime = new Date().toISOString()
+    const executionTimeMs = Date.now() - startMs
+    
+    // Imagen does not display token or cost information per user request
+    
+    // Build parameters object with only selected values
+    const parameters: Record<string, any> = {
+      model: modelVersion,
+      aspectRatio: formData.aspectRatio,
+      sampleCount: formData.sampleCount,
+    }
+    
+    // Only add parameters that were actually selected (not empty)
+    if (formData.style) parameters.primaryStyle = formData.style
+    if (formData.secondary_style) parameters.secondaryStyle = formData.secondary_style
+    if (formData.light) parameters.lighting = formData.light
+    if (formData.light_coming_from) parameters.lightOrigin = formData.light_coming_from
+    if (formData.perspective) parameters.perspective = formData.perspective
+    if (formData.shot_from) parameters.viewAngle = formData.shot_from
+    if (formData.image_colors) parameters.colors = formData.image_colors
+    if (formData.use_case) parameters.useCase = formData.use_case
+    if (formData.personGeneration) parameters.personGeneration = formData.personGeneration
+    if (formData.negativePrompt) parameters.negativePrompt = formData.negativePrompt
+    if (formData.seedNumber) parameters.seedNumber = formData.seedNumber
+    if (formData.outputOptions) parameters.outputOptions = formData.outputOptions
+    
+    // Always add prompt (truncated)
+    parameters.prompt = (fullPrompt as string).substring(0, 150) + '...'
+    
+    // Imagen metadata - only execution time and parameters
+    const generationMetadata: any = {
+      executionTimeMs,
+      startTime,
+      endTime,
+      parameters,
+    }
+    
+    // Log generation details
+    console.log('🎨 Image Generation Complete:', {
+      model: modelVersion,
+      executionTime: `${(executionTimeMs / 1000).toFixed(2)}s`,
+      imageCount: resultImages.length,
+      tokens: generationMetadata.totalTokens,
+      parameters: generationMetadata.parameters,
+    })
 
     const isResultBase64Images: boolean = resultImages.every((image) => image.hasOwnProperty('bytesBase64Encoded'))
 
@@ -473,6 +556,7 @@ export async function generateImage(
         userID: appContext?.userID ? appContext?.userID : '',
         modelVersion: modelVersion,
         mode: 'Generated',
+        metadata: generationMetadata,
       })
     else
       enhancedImageList = await buildImageListFromURI({
@@ -484,12 +568,19 @@ export async function generateImage(
         userID: appContext?.userID ? appContext?.userID : '',
         modelVersion: modelVersion,
         mode: 'Generated',
+        metadata: generationMetadata,
       })
+
+    console.log('🎨 Imagen Generation Complete:', {
+      model: modelVersion,
+      executionTime: `${(executionTimeMs / 1000).toFixed(2)}s`,
+      imageCount: resultImages.length,
+    })
 
     return enhancedImageList
   } catch (error) {
     const errorString = error instanceof Error ? error.toString() : String(error)
-    console.error(errorString)
+    console.error('❌ Imagen Generation Error:', errorString)
 
     if (
       errorString.includes('safety settings for peopleface generation') ||
@@ -500,13 +591,17 @@ export async function generateImage(
         error: errorString.replace(/^Error: /i, ''),
       }
 
-    const myError = error as Error & { errors: any[] }
-    let myErrorMsg = ''
-    if (myError.errors && myError.errors[0] && myError.errors[0].message)
+    const myError = error as Error & { errors?: any[] }
+    let myErrorMsg = 'An unexpected error occurred.'
+    
+    if (myError.errors && myError.errors.length > 0 && myError.errors[0]?.message) {
       myErrorMsg = myError.errors[0].message.replace('Image generation failed with the following error: ', '')
+    } else if (myError.message) {
+      myErrorMsg = myError.message
+    }
 
     return {
-      error: myErrorMsg || 'An unexpected error occurred.',
+      error: myErrorMsg,
     }
   }
 }
@@ -636,8 +731,14 @@ export async function editImage(formData: EditImageFormI, appContext: appContext
       }
     }
 
-    const myError = error as Error & { errors: any[] }
-    const myErrorMsg = myError.errors[0].message
+    const myError = error as Error & { errors?: any[] }
+    let myErrorMsg = 'Issue while editing image.'
+    
+    if (myError.errors && myError.errors.length > 0 && myError.errors[0].message) {
+      myErrorMsg = myError.errors[0].message
+    } else if (myError.message) {
+      myErrorMsg = myError.message
+    }
 
     return {
       error: myErrorMsg,
