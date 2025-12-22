@@ -498,6 +498,24 @@ export interface VideoI {
   author: string
   modelVersion: string
   mode: string
+  // Performance metadata
+  metadata?: {
+    tokensUsed?: number
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    executionTimeMs?: number
+    startTime?: string
+    endTime?: string
+    estimatedCost?: number
+    parameters?: Record<string, any>
+    perImageTokens?: Array<{
+      imageIndex: number
+      promptTokens: number
+      candidatesTokens: number
+      totalTokens: number
+    }>
+  }
 }
 
 // Interface for the successful initiation response
@@ -564,6 +582,8 @@ export type ProcessedVideoResult = VideoI | { warning: string } | { error: strin
 export interface OperationMetadataI {
   formData: GenerateVideoFormI
   prompt: string
+  startTime: string
+  startMs: number
 }
 
 // List of Veo available ratio and their corresponding generation dimentions

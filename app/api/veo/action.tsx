@@ -125,7 +125,19 @@ export async function buildVideoListFromURI({
   userID,
   modelVersion,
   mode,
-}: BuildVideoListParams): Promise<VideoI[]> {
+  metadata,
+}: BuildVideoListParams & {
+  metadata?: {
+    tokensUsed?: number
+    inputTokens?: number
+    outputTokens?: number
+    totalTokens?: number
+    executionTimeMs?: number
+    startTime?: string
+    endTime?: string
+    parameters?: Record<string, any>
+  }
+}): Promise<VideoI[]> {
   const promises = videosInGCS.map(async (videoResult): Promise<ProcessedVideoResult | null> => {
     // 1. Check for RAI filtering
     const raiReason = (videoResult as any).raiFilteredReason
@@ -191,6 +203,7 @@ export async function buildVideoListFromURI({
         author: userID,
         modelVersion: modelVersion,
         mode: mode,
+        metadata: metadata,
       }
       return videoDetails
     } catch (error) {
@@ -244,6 +257,17 @@ export async function generateVideo(
   const isInterpolation = hasInterpolImageFirst && hasInterpolImageLast
   const isCameraPreset = formData.cameraPreset !== ''
 
+  // 0.1 - Validate model capabilities
+  const modelVersion = formData.modelVersion || GenerateVideoFormFields.modelVersion.default
+  const isFastModel = modelVersion.includes('fast')
+  
+  // Check if image-to-video is supported by the selected model
+  if ((isImageToVideo || isInterpolation) && isFastModel) {
+    return {
+      error: 'Image-to-video is not supported by Fast models. Please select a non-Fast model (Veo 3.1 Preview, Veo 3.0, or Veo 2.0).',
+    }
+  }
+
   // 1 - Authenticate to Google Cloud
   let client
   try {
@@ -258,11 +282,11 @@ export async function generateVideo(
 
   const location = 'us-central1' //TODO temp - update when not in Preview anymore
   const projectId = process.env.NEXT_PUBLIC_PROJECT_ID
-  let modelVersion = formData.modelVersion || GenerateVideoFormFields.modelVersion.default
-  if (isInterpolation || isCameraPreset) modelVersion = 'veo-2.0-generate-exp' //TODO temp - update when not in Preview anymore
+  let finalModelVersion = modelVersion
+  if (isInterpolation || isCameraPreset) finalModelVersion = 'veo-2.0-generate-exp' //TODO temp - update when not in Preview anymore
 
   // Construct the API URL for initiating long-running video generation
-  const videoAPIUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelVersion}:predictLongRunning`
+  const videoAPIUrl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${finalModelVersion}:predictLongRunning`
 
   // 2 - Build the prompt
   let fullPrompt: string | ErrorResult
@@ -285,11 +309,14 @@ export async function generateVideo(
     storageUri: generationGcsURI,
     negativePrompt: formData.negativePrompt,
     personGeneration: formData.personGeneration,
-    generateAudio: formData.modelVersion.includes('veo-3.0') && formData.isVideoWithAudio,
+    generateAudio:
+      (formData.modelVersion.includes('veo-3.0') || formData.modelVersion.includes('veo-3.1')) &&
+      formData.isVideoWithAudio,
   }
 
   // TODO - Temp until resolution available for all models
-  if (formData.modelVersion.includes('veo-3.0')) parameters['resolution'] = formData.resolution
+  if (formData.modelVersion.includes('veo-3.0') || formData.modelVersion.includes('veo-3.1'))
+    parameters['resolution'] = formData.resolution
 
   if (formData['seedNumber']) parameters['seed'] = parseInt(formData['seedNumber'], 10)
 
@@ -383,6 +410,17 @@ export async function generateVideo(
     data: reqData,
   }
 
+  // Debug logging for image-to-video requests
+  if (isImageToVideo || isInterpolation) {
+    console.log('Image-to-video request details:', {
+      model: finalModelVersion,
+      hasImageFirst: !!reqData.instances[0].image,
+      hasImageLast: !!reqData.instances[0].lastFrame,
+      imageFormat: reqData.instances[0].image?.mimeType || reqData.instances[0].lastFrame?.mimeType,
+      promptLength: (fullPrompt as string).length,
+    })
+  }
+
   // 7 - Initiate video generation request
   try {
     const res = await client.request(opts)
@@ -435,7 +473,9 @@ export async function getVideoGenerationStatus(
   operationName: string,
   appContext: appContextDataI | null,
   formData: GenerateVideoFormI,
-  passedPrompt: string
+  passedPrompt: string,
+  startTime?: string,
+  startMs?: number
 ): Promise<VideoGenerationStatusResult> {
   // 1 - Authenticate to Google Cloud
   let client
@@ -477,6 +517,14 @@ export async function getVideoGenerationStatus(
     const res = await client.request(opts)
 
     const pollingData: PollingResponse = res.data // Assuming PollingResponse matches LRO Get response
+    
+    // Log complete polling response for debugging
+    console.log('🔍 Video Polling Response Structure:', {
+      done: pollingData.done,
+      hasError: !!pollingData.error,
+      hasResponse: !!pollingData.response,
+      responseKeys: pollingData.response ? Object.keys(pollingData.response) : [],
+    })
 
     if (!pollingData.done) return { done: false, name: operationName }
     else {
@@ -497,12 +545,118 @@ export async function getVideoGenerationStatus(
 
         return { done: true, error: pollingData.error.message || 'Video generation failed.' }
       } else if (pollingData.response && pollingData.response.videos) {
+        // Log complete response structure
+        console.log('📦 Full pollingData.response:', JSON.stringify(pollingData.response, null, 2))
+        
         const rawVideoResults = pollingData.response.videos.map((video: any) => ({
           gcsUri: video.gcsUri,
           mimeType: video.mimeType,
         }))
 
         const usedRatio = VideoRatioToPixel.find((item) => item.ratio === formData.aspectRatio)
+
+        // Calculate metadata if timing was provided
+        const endTime = new Date().toISOString()
+        const executionTimeMs = startMs ? Date.now() - startMs : undefined
+        
+        // Extract token usage from API response if available
+        let tokenUsage: any = {}
+        
+        // Check multiple possible locations for token data
+        const responseData: any = pollingData.response
+        if (responseData.metadata) {
+          console.log('📊 Veo API Response Metadata:', JSON.stringify(responseData.metadata, null, 2))
+          
+          const metadata = responseData.metadata
+          const extractedTokens = {
+            tokensUsed: metadata.tokenMetadata?.totalTokens || metadata.totalTokens,
+            inputTokens: metadata.tokenMetadata?.inputTokens || metadata.promptTokenCount,
+            outputTokens: metadata.tokenMetadata?.outputTokens || metadata.candidatesTokenCount,
+            totalTokens: metadata.tokenMetadata?.totalTokens || metadata.totalTokens,
+          }
+          
+          // Only use if we actually got token data
+          if (extractedTokens.totalTokens) {
+            tokenUsage = extractedTokens
+            console.log('✅ Actual Token Usage from API:', tokenUsage)
+          }
+        } else {
+          console.log('ℹ️ Veo API does not return token metadata')
+        }
+        
+        // Also check root level and other possible locations
+        if (responseData.tokenMetadata || responseData.usageMetadata) {
+          console.log('📊 Token data found at response root:', 
+            responseData.tokenMetadata || responseData.usageMetadata)
+          const rootMetadata = responseData.usageMetadata || responseData.tokenMetadata
+          if (rootMetadata.totalTokenCount || rootMetadata.totalTokens) {
+            tokenUsage = {
+              inputTokens: rootMetadata.promptTokenCount,
+              outputTokens: rootMetadata.candidatesTokenCount,
+              totalTokens: rootMetadata.totalTokenCount || rootMetadata.totalTokens,
+            }
+          }
+        }
+        
+        // Veo does not display estimated cost per user request
+        
+        // Build parameters object with only selected values
+        const parameters: Record<string, any> = {
+          model: formData.modelVersion,
+          aspectRatio: formData.aspectRatio,
+          resolution: formData.resolution,
+          durationSeconds: `${formData.durationSeconds}s`,
+          sampleCount: formData.sampleCount,
+        }
+        
+        // Only add parameters that were actually selected (not empty)
+        if (formData.isVideoWithAudio) parameters.audioEnabled = 'Yes'
+        if (formData.style) parameters.primaryStyle = formData.style
+        if (formData.secondary_style) parameters.secondaryStyle = formData.secondary_style
+        if (formData.motion) parameters.motion = formData.motion
+        if (formData.angle) parameters.angle = formData.angle
+        if (formData.ambiance) parameters.ambiance = formData.ambiance
+        if (formData.effects) parameters.effects = formData.effects
+        if (formData.cameraPreset) parameters.cameraPreset = formData.cameraPreset
+        if (formData.personGeneration) parameters.personGeneration = formData.personGeneration
+        if (formData.negativePrompt) parameters.negativePrompt = formData.negativePrompt
+        if (formData.seedNumber) parameters.seedNumber = formData.seedNumber
+        
+        // Always add prompt (truncated)
+        parameters.prompt = passedPrompt.substring(0, 150) + '...'
+        
+        // Only include metadata if we have timing data
+        const generationMetadata: any = executionTimeMs ? {
+          executionTimeMs,
+          startTime: startTime || '',
+          endTime,
+          parameters,
+        } : undefined
+        
+        // Add token data only if available from API
+        if (generationMetadata && tokenUsage.totalTokens) {
+          generationMetadata.tokensUsed = tokenUsage.tokensUsed
+          generationMetadata.inputTokens = tokenUsage.inputTokens
+          generationMetadata.outputTokens = tokenUsage.outputTokens
+          generationMetadata.totalTokens = tokenUsage.totalTokens
+        }
+        
+        // Log generation details
+        if (generationMetadata) {
+          const logData: any = {
+            model: formData.modelVersion,
+            executionTime: `${(executionTimeMs! / 1000).toFixed(2)}s`,
+            videoCount: rawVideoResults.length,
+            duration: `${formData.durationSeconds}s`,
+            resolution: formData.resolution,
+          }
+          
+          if (generationMetadata.totalTokens) {
+            logData.tokens = generationMetadata.totalTokens
+          }
+          
+          console.log('🎬 Video Generation Complete:', logData)
+        }
 
         const enhancedVideoList = await buildVideoListFromURI({
           videosInGCS: rawVideoResults,
@@ -515,6 +669,7 @@ export async function getVideoGenerationStatus(
           userID: appContext?.userID || '',
           modelVersion: formData.modelVersion,
           mode: 'Generated',
+          metadata: generationMetadata,
         })
         return { done: true, videos: enhancedVideoList }
       } else {

@@ -147,7 +147,9 @@ export default function Page() {
           pollingOperation.name,
           appContext,
           pollingOperation.metadata.formData,
-          pollingOperation.metadata.prompt
+          pollingOperation.metadata.prompt,
+          pollingOperation.metadata.startTime,
+          pollingOperation.metadata.startMs
         )
 
         // If polling was stopped while waiting for status

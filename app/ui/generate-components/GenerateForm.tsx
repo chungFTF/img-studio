@@ -189,11 +189,11 @@ export default function GenerateForm({
       interpolImageLast.base64Image !== '')
 
   // Determines if the current model supports audio generation.
-  const isAudioAvailable = currentModel.includes('veo-3.0')
+  const isAudioAvailable = currentModel.includes('veo-3.0') || currentModel.includes('veo-3.1')
   // Determines if only image-to-video is available for the current model.
   const isOnlyITVavailable =
-    currentModel.includes('veo-3.0') &&
-    !currentModel.includes('fast') &&
+    ((currentModel.includes('veo-3.0') && !currentModel.includes('fast')) ||
+      (currentModel.includes('veo-3.1') && !currentModel.includes('fast'))) &&
     process.env.NEXT_PUBLIC_VEO_ITV_ENABLED === 'true'
   // Determines if advanced features are available for the current model.
   const isAdvancedFeaturesAvailable =
@@ -252,7 +252,7 @@ export default function GenerateForm({
     }
 
     if (currentModel.includes('veo-2.0')) setValue('resolution', '720p')
-    else if (currentModel.includes('veo-3.0')) setValue('resolution', '1080p')
+    else if (currentModel.includes('veo-3.0') || currentModel.includes('veo-3.1')) setValue('resolution', '1080p')
 
     // Set fixed sample count based on model type
     if (currentModel.includes('gemini')) {
@@ -460,6 +460,9 @@ export default function GenerateForm({
   const onVideoSubmit: SubmitHandler<GenerateVideoFormI> = async (formData) => {
     onRequestSent(true, parseInt(formData.sampleCount))
 
+    const startTime = new Date().toISOString()
+    const startMs = Date.now()
+
     try {
       if (formData.interpolImageLast && formData.interpolImageLast.base64Image !== '' && formData.cameraPreset !== '')
         throw Error(
@@ -474,7 +477,12 @@ export default function GenerateForm({
 
         throw new Error(errorMsg)
       } else if ('operationName' in result && 'prompt' in result)
-        onVideoPollingStart && onVideoPollingStart(result.operationName, { formData: formData, prompt: result.prompt })
+        onVideoPollingStart && onVideoPollingStart(result.operationName, { 
+          formData: formData, 
+          prompt: result.prompt,
+          startTime,
+          startMs
+        })
       else throw new Error('Failed to initiate video generation: Invalid response from server.')
     } catch (error: any) {
       onNewErrorMsg(error.toString().replace('Error: ', ''))
@@ -584,7 +592,9 @@ export default function GenerateForm({
               control={control}
               setValue={setValue}
               generalSettingsFields={
-                currentModel.includes('veo-3.0') ? tempVeo3specificSettings : adjustedSettings
+                currentModel.includes('veo-3.0') || currentModel.includes('veo-3.1')
+                  ? tempVeo3specificSettings
+                  : adjustedSettings
               }
               advancedSettingsFields={generationFields.advancedSettings}
             />

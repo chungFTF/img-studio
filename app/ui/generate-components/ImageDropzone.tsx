@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { Box, IconButton } from '@mui/material'
-import React from 'react'
+import { Box, IconButton, CircularProgress } from '@mui/material'
+import React, { useState } from 'react'
 import { useDropzone } from 'react-dropzone'
 import Image from 'next/image'
 
@@ -51,29 +51,46 @@ export default function ImageDropzone({
   isNewImagePossible?: boolean
   refPosition?: number
 }) {
+  const [isUploading, setIsUploading] = useState(false)
+
   const onDrop = async (acceptedFiles: File[]) => {
     onNewErrorMsg('')
+    setIsUploading(true)
 
-    const file = acceptedFiles[0]
-    const allowedTypes = ['image/png', 'image/webp', 'image/jpeg']
+    try {
+      const file = acceptedFiles[0]
+      const allowedTypes = ['image/png', 'image/webp', 'image/jpeg']
 
-    if (!allowedTypes.includes(file.type)) {
-      onNewErrorMsg('Wrong input image format - Only png, jpeg and webp are allowed')
-      return
-    }
-
-    const base64 = await fileToBase64(file)
-    const newImage = `data:${file.type};base64,${base64}`
-    setImage(newImage)
-
-    if (setValue) {
-      const img = new window.Image()
-      img.onload = () => {
-        setValue(`${object}.width`, img.width)
-        setValue(`${object}.height`, img.height)
-        setValue(`${object}.ratio`, getAspectRatio(img.width, img.height))
+      if (!allowedTypes.includes(file.type)) {
+        onNewErrorMsg('Wrong input image format - Only png, jpeg and webp are allowed')
+        return
       }
-      img.src = newImage
+
+      // Check file size (limit to 10MB for video generation)
+      const maxSizeInBytes = 10 * 1024 * 1024 // 10MB
+      if (file.size > maxSizeInBytes) {
+        onNewErrorMsg('Image file is too large. Please use an image smaller than 10MB.')
+        return
+      }
+
+      const base64 = await fileToBase64(file)
+      const newImage = `data:${file.type};base64,${base64}`
+      setImage(newImage)
+
+      if (setValue) {
+        // Set the format (MIME type) for video interpolation
+        setValue(`${object}.format`, file.type)
+
+        const img = new window.Image()
+        img.onload = () => {
+          setValue(`${object}.width`, img.width)
+          setValue(`${object}.height`, img.height)
+          setValue(`${object}.ratio`, getAspectRatio(img.width, img.height))
+        }
+        img.src = newImage
+      }
+    } finally {
+      setIsUploading(false)
     }
   }
 
@@ -96,7 +113,7 @@ export default function ImageDropzone({
           overflow: 'hidden',
         }}
       >
-        {!image && (
+        {!image && !isUploading && (
           <Box
             sx={{
               width: '100%',
@@ -121,6 +138,22 @@ export default function ImageDropzone({
           >
             <input {...getInputProps()} />
             <AddPhotoAlternate sx={{ ml: 0.5, fontSize: '1.7rem' }} />
+          </Box>
+        )}
+        {isUploading && (
+          <Box
+            sx={{
+              width: '100%',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '1px solid',
+              borderColor: palette.primary.main,
+              backgroundColor: palette.primary.light + '20',
+            }}
+          >
+            <CircularProgress size={24} thickness={5} sx={{ color: palette.primary.main }} />
           </Box>
         )}
         {image && (
