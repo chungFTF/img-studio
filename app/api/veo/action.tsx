@@ -256,15 +256,37 @@ export async function generateVideo(
     (hasInterpolImageFirst && !hasInterpolImageLast) || (hasInterpolImageLast && !hasInterpolImageFirst)
   const isInterpolation = hasInterpolImageFirst && hasInterpolImageLast
   const isCameraPreset = formData.cameraPreset !== ''
+  const hasReferenceImages =
+    formData.referenceImages &&
+    Array.isArray(formData.referenceImages) &&
+    formData.referenceImages.length > 0 &&
+    formData.referenceImages.some((img) => img.base64Image !== '' && img.label !== '')
 
   // 0.1 - Validate model capabilities
   const modelVersion = formData.modelVersion || GenerateVideoFormFields.modelVersion.default
   const isFastModel = modelVersion.includes('fast')
+  const isVeo31 = modelVersion.includes('veo-3.1')
   
   // Check if image-to-video is supported by the selected model
   if ((isImageToVideo || isInterpolation) && isFastModel) {
     return {
       error: 'Image-to-video is not supported by Fast models. Please select a non-Fast model (Veo 3.1 Preview, Veo 3.0, or Veo 2.0).',
+    }
+  }
+
+  // Check if reference images are supported by the selected model
+  if (hasReferenceImages && (!isVeo31 || isFastModel)) {
+    return {
+      error: 'Reference images are only supported by Veo 3.1 Preview (non-Fast). Please select "Veo 3.1 Preview" model.',
+    }
+  }
+
+  // Check if reference images and image-to-video are used together
+  // According to Google docs: "last_frame parameter is ignored when reference_images are provided"
+  // It's unclear if first_frame is also incompatible, so we'll warn users
+  if (hasReferenceImages && (isImageToVideo || isInterpolation)) {
+    return {
+      error: 'Reference images cannot be used together with image-to-video. Please use either reference images OR image-to-video, not both.',
     }
   }
 
@@ -403,22 +425,51 @@ export async function generateVideo(
     }
   }
 
+  // 5.3 - Handle Reference Images (Veo 3.1 only)
+  if (hasReferenceImages) {
+    try {
+      const validReferenceImages = formData.referenceImages.filter(
+        (img) => img.base64Image !== '' && img.label !== ''
+      )
+
+      if (validReferenceImages.length > 3) {
+        return {
+          error: 'Maximum 3 reference images are allowed.',
+        }
+      }
+
+      const referenceImagesConfig = []
+      for (const refImg of validReferenceImages) {
+        // Extract base64 data (remove data URL prefix if present)
+        const base64Data = refImg.base64Image.startsWith('data:')
+          ? refImg.base64Image.split(',')[1]
+          : refImg.base64Image
+
+        referenceImagesConfig.push({
+          image: {
+            bytesBase64Encoded: base64Data,
+            mimeType: refImg.format,
+          },
+          referenceType: refImg.referenceType, // Should be 'asset'
+        })
+      }
+
+      // Add reference images to instances (following Veo 3.1 API format)
+      // Based on Google's documentation, referenceImages should be at the instance level
+      reqData.instances[0].referenceImages = referenceImagesConfig
+    } catch (error) {
+      console.error('Error processing reference images:', error)
+      return {
+        error: 'Error while processing reference images.',
+      }
+    }
+  }
+
   // 6 - Prepare HTTP request options
   const opts = {
     url: videoAPIUrl,
     method: 'POST',
     data: reqData,
-  }
-
-  // Debug logging for image-to-video requests
-  if (isImageToVideo || isInterpolation) {
-    console.log('Image-to-video request details:', {
-      model: finalModelVersion,
-      hasImageFirst: !!reqData.instances[0].image,
-      hasImageLast: !!reqData.instances[0].lastFrame,
-      imageFormat: reqData.instances[0].image?.mimeType || reqData.instances[0].lastFrame?.mimeType,
-      promptLength: (fullPrompt as string).length,
-    })
   }
 
   // 7 - Initiate video generation request
@@ -516,15 +567,7 @@ export async function getVideoGenerationStatus(
   try {
     const res = await client.request(opts)
 
-    const pollingData: PollingResponse = res.data // Assuming PollingResponse matches LRO Get response
-    
-    // Log complete polling response for debugging
-    console.log('🔍 Video Polling Response Structure:', {
-      done: pollingData.done,
-      hasError: !!pollingData.error,
-      hasResponse: !!pollingData.response,
-      responseKeys: pollingData.response ? Object.keys(pollingData.response) : [],
-    })
+    const pollingData: PollingResponse = res.data
 
     if (!pollingData.done) return { done: false, name: operationName }
     else {
@@ -545,9 +588,6 @@ export async function getVideoGenerationStatus(
 
         return { done: true, error: pollingData.error.message || 'Video generation failed.' }
       } else if (pollingData.response && pollingData.response.videos) {
-        // Log complete response structure
-        console.log('📦 Full pollingData.response:', JSON.stringify(pollingData.response, null, 2))
-        
         const rawVideoResults = pollingData.response.videos.map((video: any) => ({
           gcsUri: video.gcsUri,
           mimeType: video.mimeType,
@@ -565,8 +605,6 @@ export async function getVideoGenerationStatus(
         // Check multiple possible locations for token data
         const responseData: any = pollingData.response
         if (responseData.metadata) {
-          console.log('📊 Veo API Response Metadata:', JSON.stringify(responseData.metadata, null, 2))
-          
           const metadata = responseData.metadata
           const extractedTokens = {
             tokensUsed: metadata.tokenMetadata?.totalTokens || metadata.totalTokens,
@@ -578,16 +616,11 @@ export async function getVideoGenerationStatus(
           // Only use if we actually got token data
           if (extractedTokens.totalTokens) {
             tokenUsage = extractedTokens
-            console.log('✅ Actual Token Usage from API:', tokenUsage)
           }
-        } else {
-          console.log('ℹ️ Veo API does not return token metadata')
         }
         
         // Also check root level and other possible locations
         if (responseData.tokenMetadata || responseData.usageMetadata) {
-          console.log('📊 Token data found at response root:', 
-            responseData.tokenMetadata || responseData.usageMetadata)
           const rootMetadata = responseData.usageMetadata || responseData.tokenMetadata
           if (rootMetadata.totalTokenCount || rootMetadata.totalTokens) {
             tokenUsage = {
@@ -646,7 +679,7 @@ export async function getVideoGenerationStatus(
           const logData: any = {
             model: formData.modelVersion,
             executionTime: `${(executionTimeMs! / 1000).toFixed(2)}s`,
-            videoCount: rawVideoResults.length,
+            videoCount: 1,
             duration: `${formData.durationSeconds}s`,
             resolution: formData.resolution,
           }

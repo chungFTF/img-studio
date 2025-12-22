@@ -91,8 +91,8 @@ export const GenerateVideoFormFields = {
   sampleCount: {
     label: 'Quantity of outputs',
     type: 'chip-group',
-    default: '4',
-    options: ['1', '2', '3', '4'],
+    default: '1',
+    options: ['1', '2'],
     isDataResetable: false,
     isFullPromptAdditionalField: false,
   },
@@ -357,6 +357,25 @@ export interface InterpolImageI {
   height: number
 }
 
+// Interface for Reference Images (Veo 3.1 only)
+export const ReferenceImageDefaults: ReferenceImageI = {
+  format: 'image/png',
+  base64Image: '',
+  label: '',
+  referenceType: 'asset' as const,
+  imageKey: '',
+}
+
+export interface ReferenceImageI {
+  format: string
+  base64Image: string
+  label: string // User-defined label/tag name
+  referenceType: 'asset' // Fixed to 'asset' for Veo 3.1
+  imageKey: string // Unique identifier
+}
+
+export const maxReferenceImages = 3
+
 // Set default values for Generate Form
 const generateFieldList: [keyof GenerateVideoFormFieldsI] = Object.keys(GenerateVideoFormFields) as [
   keyof GenerateVideoFormFieldsI
@@ -370,6 +389,7 @@ generateFieldList.forEach((field) => {
 })
 formDataDefaults.interpolImageFirst = { ...InterpolImageDefaults, purpose: 'first' }
 formDataDefaults.interpolImageLast = { ...InterpolImageDefaults, purpose: 'last' }
+formDataDefaults.referenceImages = []
 
 interface CompositionFieldsI {
   motion: GenerateFieldI1
@@ -425,8 +445,8 @@ export const tempVeo3specificSettings = {
   sampleCount: {
     label: 'Quantity of outputs',
     type: 'chip-group',
-    default: '4',
-    options: ['1', '2', '3', '4'],
+    default: '1',
+    options: ['1', '2'],
     isDataResetable: false,
     isFullPromptAdditionalField: false,
   },
@@ -478,6 +498,7 @@ export interface GenerateVideoFormI {
   interpolImageFirst: InterpolImageI
   interpolImageLast: InterpolImageI
   cameraPreset: string
+  referenceImages: ReferenceImageI[] // Veo 3.1 reference images (max 3)
 }
 
 // Interface of Video object created after image generation

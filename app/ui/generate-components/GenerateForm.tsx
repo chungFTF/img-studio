@@ -53,6 +53,7 @@ import CustomTooltip from '../ux-components/Tooltip'
 import GenerateSettings from './GenerateSettings'
 import ImageToPromptModal from './ImageToPromptModal'
 import { ReferenceBox } from './ReferenceBox'
+import { VideoReferenceBox } from './VideoReferenceBox'
 
 import theme from '../../theme'
 const { palette } = theme
@@ -81,6 +82,9 @@ import {
   tempVeo3specificSettings,
   VideoGenerationFieldsI,
   videoGenerationUtils,
+  ReferenceImageDefaults,
+  ReferenceImageI,
+  maxReferenceImages,
 } from '@/app/api/generate-video-utils'
 import { generateVideo } from '@/app/api/veo/action'
 import { getOrientation, VideoInterpolBox } from './VideoInterpolBox'
@@ -139,6 +143,7 @@ export default function GenerateForm({
 
   // --- Watched Form Values ---
   const referenceObjects = watch('referenceObjects')
+  const referenceImages = watch('referenceImages')
   const isVideoWithAudio = watch('isVideoWithAudio')
   const interpolImageFirst = watch('interpolImageFirst')
   const interpolImageLast = watch('interpolImageLast')
@@ -198,6 +203,8 @@ export default function GenerateForm({
   // Determines if advanced features are available for the current model.
   const isAdvancedFeaturesAvailable =
     currentModel.includes('veo-2.0') && process.env.NEXT_PUBLIC_VEO_ADVANCED_ENABLED === 'true'
+  // Determines if reference images are available for Veo 3.1.
+  const isReferenceImagesAvailable = currentModel.includes('veo-3.1') && !currentModel.includes('fast')
 
   // Determines the available secondary styles based on the selected primary style.
   const subImgStyleField = React.useMemo(() => {
@@ -212,8 +219,11 @@ export default function GenerateForm({
   useEffect(() => {
     if (generationType === 'Video') {
       if (initialITVimage && initialITVimage.base64Image !== '') setExpanded('interpolation')
-      else setExpanded('attributes')
-    } else if (generationType === 'Image') setExpanded('attributes')
+      else setExpanded(false) // Don't force any accordion, let user control
+    } else if (generationType === 'Image') {
+      if (initialITVimage) setExpanded('references')
+      else setExpanded(false) // Don't force any accordion, let user control
+    }
   }, [initialITVimage, generationType])
 
   // Sets the model version to the default for the selected options.
@@ -359,6 +369,28 @@ export default function GenerateForm({
     setValue('referenceObjects', updatedReferenceObjects)
   }
 
+  // Removes a reference image from the form (for video generation).
+  const removeReferenceImage = (imageKey: string) => {
+    const updatedReferenceImages = referenceImages.filter((img) => img.imageKey !== imageKey)
+    if (updatedReferenceImages.length === 0) setValue('referenceImages', [])
+    else setValue('referenceImages', updatedReferenceImages)
+  }
+
+  // Adds a new reference image to the form (for video generation).
+  const addNewReferenceImage = () => {
+    if (referenceImages.length >= maxReferenceImages) return
+
+    const updatedReferenceImages = [
+      ...referenceImages,
+      {
+        ...ReferenceImageDefaults,
+        imageKey: Math.random().toString(36).substring(2, 15),
+      },
+    ]
+
+    setValue('referenceImages', updatedReferenceImages)
+  }
+
   // Transforms a "Publisher Model not found" error message into a user-friendly message.
   interface ModelOption {
     value: string
@@ -397,6 +429,7 @@ export default function GenerateForm({
     if (generationType === 'Video') {
       setValue('interpolImageFirst', generationFields.defaultValues.interpolImageFirst)
       setValue('interpolImageLast', generationFields.defaultValues.interpolImageLast)
+      setValue('referenceImages', [])
     }
 
     setOrientation('horizontal')
@@ -697,6 +730,18 @@ export default function GenerateForm({
                 // Advanced features (interpolation, camera preset) are only available for Veo 2 for now!
                 isAdvancedFeaturesAvailable && (
                   <AccordionDetails sx={{ pt: 0, pb: 1, height: 'auto' }}>
+                    <Typography
+                      variant="body2"
+                      sx={{ color: palette.text.secondary, fontSize: '0.85rem', pb: 1, fontWeight: 400 }}
+                    >
+                      <strong>Image-to-Video:</strong> Convert a static image into video. The image becomes the first or last frame, and the video animates from that starting point. This feature turns your image into motion.
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      sx={{ color: palette.info.main, fontSize: '0.8rem', pb: 2, fontWeight: 400 }}
+                    >
+                      ℹ️ Use this when you have a specific starting/ending frame. For style/character consistency across the video, use Reference Images (Veo 3.1 only) instead.
+                    </Typography>
                     <Stack
                       direction="row"
                       flexWrap="wrap"
@@ -744,6 +789,18 @@ export default function GenerateForm({
                 // Advanced features (interpolation, camera preset) are only available for Veo 2 for now!
                 isOnlyITVavailable && (
                   <AccordionDetails sx={{ pt: 0, pb: 1, height: 'auto' }}>
+                    <Typography
+                      variant="body2"
+                      sx={{ color: palette.text.secondary, fontSize: '0.85rem', pb: 1, fontWeight: 400 }}
+                    >
+                      <strong>Image-to-Video:</strong> Convert a static image into video. The image becomes the first frame, and the video animates from that starting point. This feature turns your image into motion.
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      sx={{ color: palette.info.main, fontSize: '0.8rem', pb: 2, fontWeight: 400 }}
+                    >
+                      ℹ️ Use this when you have a specific starting frame. For style/character consistency across the video, use Reference Images (Veo 3.1 only) instead.
+                    </Typography>
                     <Stack
                       direction="row"
                       flexWrap="wrap"
@@ -766,7 +823,7 @@ export default function GenerateForm({
                         sx={{ fontSize: '0.85rem', fontWeight: 400, pt: 2, width: '70%' }}
                       >
                         {
-                          'For now, Veo 3 does not support Image Interpolation and Camera Presets, switch to Veo 2 to use them!'
+                          'Note: Veo 3 does not support Image Interpolation and Camera Presets. Switch to Veo 2 to use them!'
                         }
                       </Typography>
                     </Stack>
@@ -775,11 +832,84 @@ export default function GenerateForm({
               }
             </Accordion>
           )}
+          {generationType === 'Video' && isReferenceImagesAvailable && (
+            <Accordion
+              disableGutters
+              expanded={expanded === 'referenceImages'}
+              onChange={handleChange('referenceImages')}
+              sx={CustomizedAccordion}
+            >
+              <AccordionSummary
+                expandIcon={<ArrowDownwardIcon sx={{ color: palette.primary.main }} />}
+                aria-controls="panel-reference-images-content"
+                id="panel-reference-images-header"
+                sx={CustomizedAccordionSummary}
+              >
+                <Typography display="inline" variant="body1" sx={{ fontWeight: 500 }}>
+                  {'Reference images (up to 3)'}
+                </Typography>
+              </AccordionSummary>
+              <AccordionDetails sx={{ pt: 0, pb: 1, height: 'auto' }}>
+                <Typography
+                  variant="body2"
+                  sx={{ color: palette.text.secondary, fontSize: '0.85rem', pb: 1, fontWeight: 400 }}
+                >
+                  <strong>Reference Images (Veo 3.1 only):</strong> Provide up to 3 reference images to guide video generation and maintain visual consistency of characters, products, or styles.
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ color: palette.warning.main, fontSize: '0.8rem', pb: 1, fontWeight: 400, fontStyle: 'italic' }}
+                >
+                  Note: These images guide the model through natural language descriptions in your prompt (e.g., "a woman with dark hair wearing a pink dress"), not through label tags. Labels are for your own reference to remember what to describe in the prompt.
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ color: palette.info.main, fontSize: '0.8rem', pb: 2, fontWeight: 400 }}
+                >
+                  ⚠️ Cannot be used together with Image-to-Video. Choose one: Use Reference Images for style/character consistency, or Image-to-Video to animate a specific static image.
+                </Typography>
+                <Stack
+                  direction="column"
+                  flexWrap="wrap"
+                  justifyContent="flex-start"
+                  alignItems="flex-start"
+                  spacing={1}
+                  sx={{ pt: 0, pb: 1 }}
+                >
+                  {referenceImages.map((referenceImage, index) => {
+                    return (
+                      <VideoReferenceBox
+                        key={referenceImage.imageKey + index + '_box'}
+                        imageKey={referenceImage.imageKey}
+                        currentReferenceImage={referenceImage}
+                        onNewErrorMsg={onNewErrorMsg}
+                        control={control}
+                        setValue={setValue}
+                        removeReferenceImage={removeReferenceImage}
+                        refPosition={index}
+                        refCount={referenceImages.length}
+                      />
+                    )
+                  })}
+                </Stack>
+                {referenceImages.length < maxReferenceImages && (
+                  <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-start' }}>
+                    <Button
+                      variant="contained"
+                      onClick={() => addNewReferenceImage()}
+                      disabled={referenceImages.length >= maxReferenceImages}
+                      sx={{ ...CustomizedSendButton, ...{ fontSize: '0.8rem', px: 0 } }}
+                    >
+                      {'Add reference image'}
+                    </Button>
+                  </Box>
+                )}
+              </AccordionDetails>
+            </Accordion>
+          )}
           <Accordion
             disableGutters
             defaultExpanded
-            expanded={expanded === 'attributes'}
-            onChange={handleChange('attributes')}
             sx={CustomizedAccordion}
           >
             <AccordionSummary
