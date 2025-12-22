@@ -18,7 +18,8 @@ import * as React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import Grid from '@mui/material/Grid2'
 import Box from '@mui/material/Box'
-import { Typography } from '@mui/material'
+import { Typography, Dialog, DialogContent, IconButton, Chip, Stack } from '@mui/material'
+import { PlayCircleOutline, Close, Fullscreen } from '@mui/icons-material'
 
 import GenerateForm from '../../ui/generate-components/GenerateForm'
 import OutputImagesDisplay from '../../ui/transverse-components/ImagenOutputImagesDisplay'
@@ -37,6 +38,7 @@ import {
 import { getVideoGenerationStatus } from '@/app/api/veo/action'
 import { downloadMediaFromGcs } from '@/app/api/cloud-storage/action'
 import { getAspectRatio } from '@/app/ui/edit-components/EditImageDropzone'
+import { saveGenerationMetadata, GenerationMetadata } from '@/app/api/generation-metadata'
 import theme from '../../theme'
 
 // Constants
@@ -62,11 +64,37 @@ export default function Page() {
   const [initialPrompt, setInitialPrompt] = useState<string | null>(null)
   const [initialITVimage, setInitialITVimage] = useState<InterpolImageI | null>(null)
 
+  // Recent generations state (localStorage)
+  const [recentGenerations, setRecentGenerations] = useState<(ImageI | VideoI)[]>([])
+  const [playingRecentVideo, setPlayingRecentVideo] = useState<string | null>(null)
+  const [fullscreenMedia, setFullscreenMedia] = useState<{
+    url: string
+    item: ImageI | VideoI
+    isVideo: boolean
+  } | null>(null)
+  const STORAGE_KEY_RECENT = 'recent_generations'
+  const MAX_RECENT_ITEMS = 10
+
   // Polling state
   const [pollingOperation, setPollingOperation] = useState<{ name: string; metadata: OperationMetadataI } | null>(null)
   const pollingTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const pollingAttemptsRef = useRef(0)
   const pollingIntervalRef = useRef(INITIAL_POLLING_INTERVAL_MS)
+
+  // Load recent generations from localStorage on mount
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = localStorage.getItem(STORAGE_KEY_RECENT)
+        if (stored) {
+          const parsed = JSON.parse(stored)
+          setRecentGenerations(Array.isArray(parsed) ? parsed : [])
+        }
+      } catch (error) {
+        console.error('Error loading recent generations:', error)
+      }
+    }
+  }, [])
 
   // Effect for handling prompts from other pages (e.g., Library)
   useEffect(() => {
@@ -161,6 +189,10 @@ export default function Page() {
           } else if (statusResult.videos?.length) {
             setGeneratedVideos(statusResult.videos)
             setGeneratedImages([])
+            
+            // Save to localStorage and History
+            saveToRecentGenerations(statusResult.videos)
+            saveVideoToHistory(statusResult.videos, pollingOperation.metadata)
           } else {
             setGenerationErrorMsg('Video generation finished, but no results were returned.')
           }
@@ -219,9 +251,142 @@ export default function Page() {
     setGeneratedVideos([])
   }
 
+  // Save generations to localStorage
+  const saveToRecentGenerations = (items: (ImageI | VideoI)[]) => {
+    if (typeof window === 'undefined') return
+    
+    try {
+      const updated = [...items, ...recentGenerations].slice(0, MAX_RECENT_ITEMS)
+      setRecentGenerations(updated)
+      localStorage.setItem(STORAGE_KEY_RECENT, JSON.stringify(updated))
+    } catch (error) {
+      console.error('Error saving to recent generations:', error)
+    }
+  }
+
+  // Save video generation to History
+  const saveVideoToHistory = async (videos: VideoI[], metadata: OperationMetadataI) => {
+    if (!videos.length) {
+      console.log('📋 No videos to save to history')
+      return
+    }
+    
+    try {
+      const video = videos[0] // Use first video for metadata
+      const generationMetadata: GenerationMetadata = {
+        id: `video_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        timestamp: new Date().toISOString(),
+        type: 'video',
+        model: video.modelVersion,
+        prompt: metadata.prompt,
+        negativePrompt: metadata.formData.negativePrompt || undefined,
+        parameters: {
+          userQuery: metadata.prompt, // Original user query/prompt
+          aspectRatio: metadata.formData.aspectRatio,
+          resolution: metadata.formData.resolution,
+          duration: `${metadata.formData.durationSeconds}s`,
+          sampleCount: metadata.formData.sampleCount,
+          isVideoWithAudio: metadata.formData.isVideoWithAudio,
+          style: metadata.formData.style,
+          secondary_style: metadata.formData.secondary_style,
+        },
+        outputs: videos.map(v => ({
+          url: v.src,
+          gcsUri: v.gcsUri,
+          format: v.format,
+          width: v.width,
+          height: v.height,
+          duration: v.duration,
+        })),
+        performance: {
+          tokensUsed: video.metadata?.tokensUsed,
+          inputTokens: video.metadata?.inputTokens,
+          outputTokens: video.metadata?.outputTokens,
+          totalTokens: video.metadata?.totalTokens,
+          executionTimeMs: video.metadata?.executionTimeMs || 0,
+          startTime: metadata.startTime,
+          endTime: video.metadata?.endTime || new Date().toISOString(),
+        },
+        cost: video.metadata?.estimatedCost ? {
+          estimatedCost: video.metadata.estimatedCost,
+          currency: 'USD',
+        } : undefined,
+      }
+      
+      console.log('📋 Saving video to history:', generationMetadata.id)
+      const result = await saveGenerationMetadata(generationMetadata)
+      if (result.success) {
+        console.log('✅ Video saved to history:', result.path)
+      } else {
+        console.error('❌ Failed to save video to history:', result.error)
+      }
+    } catch (error) {
+      console.error('Error saving video to history:', error)
+    }
+  }
+
+  // Save image generation to History
+  const saveImageToHistory = async (images: ImageI[]) => {
+    if (!images.length) {
+      console.log('📋 No images to save to history')
+      return
+    }
+    
+    try {
+      const image = images[0] // Use first image for metadata
+      const generationMetadata: GenerationMetadata = {
+        id: `image_${Date.now()}_${Math.random().toString(36).substring(7)}`,
+        timestamp: new Date().toISOString(),
+        type: 'image',
+        model: image.modelVersion,
+        prompt: image.prompt,
+        negativePrompt: undefined,
+        parameters: {
+          userQuery: image.prompt, // Original user query/prompt
+          aspectRatio: image.ratio,
+          sampleCount: images.length,
+        },
+        outputs: images.map(img => ({
+          url: img.src,
+          gcsUri: img.gcsUri,
+          format: img.format,
+          width: img.width,
+          height: img.height,
+        })),
+        performance: {
+          tokensUsed: image.metadata?.tokensUsed,
+          inputTokens: image.metadata?.inputTokens,
+          outputTokens: image.metadata?.outputTokens,
+          totalTokens: image.metadata?.totalTokens,
+          executionTimeMs: image.metadata?.executionTimeMs || 0,
+          startTime: image.metadata?.startTime || new Date().toISOString(),
+          endTime: image.metadata?.endTime || new Date().toISOString(),
+        },
+        cost: image.metadata?.estimatedCost ? {
+          estimatedCost: image.metadata.estimatedCost,
+          currency: 'USD',
+        } : undefined,
+      }
+      
+      console.log('📋 Saving image to history:', generationMetadata.id)
+      const result = await saveGenerationMetadata(generationMetadata)
+      if (result.success) {
+        console.log('✅ Image saved to history:', result.path)
+      } else {
+        console.error('❌ Failed to save image to history:', result.error)
+      }
+    } catch (error) {
+      console.error('Error saving image to history:', error)
+    }
+  }
+
   const handleImageGeneration = (newImages: ImageI[]) => {
     setGeneratedImages(newImages)
     setIsLoading(false)
+    
+    // Save to localStorage and History
+    saveToRecentGenerations(newImages)
+    saveImageToHistory(newImages)
   }
 
   const handleVideoPollingStart = (operationName: string, metadata: OperationMetadataI) => {
@@ -289,6 +454,11 @@ export default function Page() {
       'Describe your video: subjects, visual looks, actions, arrangement, movements, camera motion, setting (time/ place/ weather), style, lighting, colors, mood',
   }
 
+  // Check if item is video
+  const isVideoItem = (item: ImageI | VideoI): item is VideoI => {
+    return 'duration' in item
+  }
+
   return (
     <Box p={5} sx={{ maxHeight: '100vh' }}>
       <Grid wrap="nowrap" container spacing={6} direction="row" columns={2}>
@@ -322,8 +492,212 @@ export default function Page() {
               generatedCount={generatedCount}
             />
           )}
+          
+          {/* Recent Generations */}
+          {recentGenerations.length > 0 && !isLoading && (
+            <Box sx={{ mt: 4, pt: 3, borderTop: `1px solid ${palette.divider}` }}>
+              <Typography variant="h6" sx={{ mb: 1, fontWeight: 500, color: palette.text.secondary }}>
+                Recent Generations
+              </Typography>
+              <Grid container spacing={2}>
+                {recentGenerations.slice(0, 6).map((item, index) => {
+                  const isVideo = isVideoItem(item)
+                  return (
+                    <Grid key={item.key + '_recent_' + index} size={{ xs: 6, sm: 4, md: 3 }}>
+                      <Box
+                        sx={{
+                          position: 'relative',
+                          cursor: 'pointer',
+                          borderRadius: 1,
+                          overflow: 'hidden',
+                          '&:hover': {
+                            opacity: 0.8,
+                            transform: 'scale(1.02)',
+                            transition: 'all 0.2s',
+                          },
+                        }}
+                      >
+                        <Box
+                          onClick={() => {
+                            setFullscreenMedia({
+                              url: item.src,
+                              item: item,
+                              isVideo: isVideo,
+                            })
+                          }}
+                          sx={{ 
+                            cursor: 'pointer',
+                            position: 'relative',
+                            width: '100%',
+                            height: '100%',
+                          }}
+                        >
+                          {isVideo ? (
+                            <>
+                              <video
+                                src={item.src}
+                                style={{
+                                  width: '100%',
+                                  height: 'auto',
+                                  display: 'block',
+                                  backgroundColor: palette.grey[900],
+                                }}
+                                muted
+                                loop
+                                playsInline
+                                preload="metadata"
+                                onLoadedMetadata={(e) => {
+                                  const video = e.currentTarget
+                                  video.currentTime = 1
+                                }}
+                              />
+                              <Box
+                                sx={{
+                                  position: 'absolute',
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  backgroundColor: 'rgba(0,0,0,0.3)',
+                                  transition: 'background-color 0.2s',
+                                  '&:hover': {
+                                    backgroundColor: 'rgba(0,0,0,0.5)',
+                                  },
+                                }}
+                              >
+                                <PlayCircleOutline
+                                  sx={{
+                                    fontSize: 48,
+                                    color: 'white',
+                                    opacity: 0.9,
+                                  }}
+                                />
+                              </Box>
+                            </>
+                          ) : (
+                            <img
+                              src={item.src}
+                              alt={item.altText}
+                              style={{
+                                width: '100%',
+                                height: 'auto',
+                                display: 'block',
+                                transition: 'opacity 0.2s',
+                              }}
+                            />
+                          )}
+                        </Box>
+                        <Box
+                          sx={{
+                            position: 'absolute',
+                            top: 4,
+                            right: 4,
+                            backgroundColor: 'rgba(0,0,0,0.7)',
+                            color: 'white',
+                            px: 1,
+                            py: 0.5,
+                            borderRadius: 0.5,
+                            fontSize: '0.7rem',
+                          }}
+                        >
+                          {isVideo ? '🎬 Video' : '🖼️ Image'}
+                        </Box>
+                      </Box>
+                    </Grid>
+                  )
+                })}
+              </Grid>
+            </Box>
+          )}
         </Grid>
       </Grid>
+
+      {/* Fullscreen Media Player Dialog */}
+      <Dialog
+        open={!!fullscreenMedia}
+        onClose={() => setFullscreenMedia(null)}
+        maxWidth={false}
+        fullWidth
+        PaperProps={{
+          sx: {
+            backgroundColor: 'rgba(0, 0, 0, 0.95)',
+            maxWidth: '90vw',
+            maxHeight: '90vh',
+            m: 2,
+          },
+        }}
+      >
+        <IconButton
+          onClick={() => setFullscreenMedia(null)}
+          sx={{
+            position: 'absolute',
+            right: 8,
+            top: 8,
+            color: 'white',
+            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+            zIndex: 1,
+            '&:hover': {
+              backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            },
+          }}
+        >
+          <Close />
+        </IconButton>
+        
+        <DialogContent sx={{ p: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          {fullscreenMedia && (
+            <Box sx={{ width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              {fullscreenMedia.isVideo ? (
+                <video
+                  src={fullscreenMedia.url}
+                  controls
+                  autoPlay
+                  loop
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '80vh',
+                    width: 'auto',
+                    height: 'auto',
+                  }}
+                />
+              ) : (
+                <img
+                  src={fullscreenMedia.url}
+                  alt="Generated content"
+                  style={{
+                    maxWidth: '100%',
+                    maxHeight: '80vh',
+                    width: 'auto',
+                    height: 'auto',
+                    objectFit: 'contain',
+                  }}
+                />
+              )}
+              
+              {/* Media metadata */}
+              <Box sx={{ mt: 2, px: 3, pb: 3, width: '100%', maxWidth: 800 }}>
+                <Stack direction="row" spacing={2} flexWrap="wrap">
+                  <Chip
+                    label={fullscreenMedia.isVideo ? '🎬 Video' : '🖼️ Image'}
+                    size="small"
+                    sx={{ bgcolor: palette.primary.main, color: 'white' }}
+                  />
+                  {fullscreenMedia.item.modelVersion && (
+                    <Chip
+                      label={fullscreenMedia.item.modelVersion}
+                      size="small"
+                      sx={{ bgcolor: palette.grey[700], color: 'white' }}
+                    />
+                  )}
+                </Stack>
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+      </Dialog>
     </Box>
   )
 }

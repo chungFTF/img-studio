@@ -73,12 +73,14 @@ export function GenerationMetadataDisplay({ metadata, compact = false }: Generat
     const cost = estimateCost(metadata.totalTokens, metadata.estimatedCost)
     
     // Don't render anything if we have no data to show
-    const hasData = metadata.executionTimeMs || metadata.totalTokens || cost
+    const hasData = (metadata.executionTimeMs && metadata.executionTimeMs > 0) || 
+                    (metadata.totalTokens && metadata.totalTokens > 0) || 
+                    (cost && parseFloat(cost) > 0)
     if (!hasData) return null
     
     return (
       <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 0.5 }}>
-        {metadata.executionTimeMs && (
+        {(metadata.executionTimeMs && metadata.executionTimeMs > 0) ? (
           <Chip
             icon={<AccessTime sx={{ fontSize: '1rem' }} />}
             label={formatTime(metadata.executionTimeMs)}
@@ -89,8 +91,8 @@ export function GenerationMetadataDisplay({ metadata, compact = false }: Generat
               fontWeight: 500,
             }}
           />
-        )}
-        {metadata.totalTokens && metadata.totalTokens > 0 && (
+        ) : null}
+        {(metadata.totalTokens && metadata.totalTokens > 0) ? (
           <Chip
             icon={<Token sx={{ fontSize: '1rem' }} />}
             label={`${formatTokens(metadata.totalTokens)} tokens`}
@@ -101,8 +103,8 @@ export function GenerationMetadataDisplay({ metadata, compact = false }: Generat
               fontWeight: 500,
             }}
           />
-        )}
-        {cost && parseFloat(cost) > 0 && (
+        ) : null}
+        {(cost && parseFloat(cost) > 0) ? (
           <Chip
             label={`~$${cost}`}
             size="small"
@@ -112,10 +114,27 @@ export function GenerationMetadataDisplay({ metadata, compact = false }: Generat
               fontWeight: 600,
             }}
           />
-        )}
+        ) : null}
       </Stack>
     )
   }
+
+  // Pre-calculate filtered parameters for use in rendering
+  const filteredParams = metadata.parameters 
+    ? Object.entries(metadata.parameters)
+        .filter(([key, value]) => 
+          key !== 'prompt' && 
+          key !== 'imported' &&
+          key !== 'originalPath' &&
+          value !== null &&
+          value !== undefined &&
+          value !== '' && 
+          value !== 'undefined'
+          // Note: Keep 0 and false as they may be meaningful parameter values
+        )
+    : []
+  const hasPrompt = metadata.parameters?.prompt
+  const hasParameters = filteredParams.length > 0 || hasPrompt
 
   return (
     <Accordion
@@ -131,73 +150,130 @@ export function GenerationMetadataDisplay({ metadata, compact = false }: Generat
           px: 0,
           minHeight: 'auto',
           '&.Mui-expanded': { minHeight: 'auto' },
-          '& .MuiAccordionSummary-content': { my: 1 },
+          '& .MuiAccordionSummary-content': { my: 0 },
         }}
       >
         <Typography variant="body2" sx={{ fontWeight: 600, color: palette.primary.main }}>
           Generation Details
         </Typography>
       </AccordionSummary>
-      <AccordionDetails sx={{ px: 0, py: 1 }}>
-        <Stack spacing={2}>
+      <AccordionDetails sx={{ px: 0, py: 0 }}>
+        <Stack spacing={0.5}>
           {/* Execution Time */}
-          {metadata.executionTimeMs && (
-            <Box>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <AccessTime sx={{ fontSize: '1.2rem', color: palette.primary.main }} />
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+          {(metadata.executionTimeMs && metadata.executionTimeMs > 0) ? (
+            <Box sx={{ mb: 0.5 }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.25 }}>
+                {/* <AccessTime sx={{ fontSize: '1.2rem', color: palette.primary.main }} /> */}
+                <Typography variant="body2" sx={{ fontWeight: 600, color: palette.grey[100] }}>
                   Execution Time
                 </Typography>
               </Stack>
-              <Typography variant="body2" sx={{ color: palette.text.secondary, pl: 3.5 }}>
+              <Typography 
+                variant="body2" 
+                sx={{ 
+                  color: palette.grey[500], 
+                  pl: 3.5,
+                  fontSize: '0.875rem',
+                }}
+              >
                 {formatTime(metadata.executionTimeMs)}
               </Typography>
               {metadata.startTime && metadata.endTime && (
-                <Typography variant="caption" sx={{ color: palette.text.disabled, pl: 3.5 }}>
+                <Typography 
+                  variant="body2" 
+                  sx={{ 
+                    color: palette.grey[400], 
+                    pl: 3.5,
+                    fontSize: '0.8rem',
+                  }}
+                >
                   {new Date(metadata.startTime).toLocaleTimeString()} → {new Date(metadata.endTime).toLocaleTimeString()}
                 </Typography>
               )}
             </Box>
-          )}
+          ) : null}
 
           {/* Token Usage - only show if we have actual token data */}
-          {metadata.totalTokens && metadata.totalTokens > 0 && (
-            <Box>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+          {(metadata.totalTokens && metadata.totalTokens > 0) ? (
+            <Box sx={{ mb: 0.5 }}>
+              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.25 }}>
                 <Token sx={{ fontSize: '1.2rem', color: palette.secondary.main }} />
                 <Typography variant="body2" sx={{ fontWeight: 600 }}>
                   Token Usage
                 </Typography>
               </Stack>
-              <Stack spacing={0.5} sx={{ pl: 3.5 }}>
-                <Typography variant="body2" sx={{ color: palette.text.secondary }}>
+              <Stack spacing={0.25} sx={{ pl: 3.5 }}>
+                <Typography 
+                  variant="body2" 
+                  sx={{ 
+                    color: palette.grey[500],
+                    fontSize: '0.875rem',
+                  }}
+                >
                   Total: <strong>{formatTokens(metadata.totalTokens)}</strong> tokens
                 </Typography>
-                {metadata.inputTokens && metadata.inputTokens > 0 && (
-                  <Typography variant="caption" sx={{ color: palette.text.disabled }}>
+                {(metadata.inputTokens && metadata.inputTokens > 0) ? (
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      color: palette.grey[400],
+                      fontSize: '0.8rem',
+                    }}
+                  >
                     Input: {formatTokens(metadata.inputTokens)} tokens
                   </Typography>
-                )}
-                {metadata.outputTokens && metadata.outputTokens > 0 && (
-                  <Typography variant="caption" sx={{ color: palette.text.disabled }}>
+                ) : null}
+                {(metadata.outputTokens && metadata.outputTokens > 0) ? (
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      color: palette.grey[400],
+                      fontSize: '0.8rem',
+                    }}
+                  >
                     Output: {formatTokens(metadata.outputTokens)} tokens
                   </Typography>
-                )}
+                ) : null}
                 
                 {/* Per-image token breakdown */}
-                {metadata.perImageTokens && metadata.perImageTokens.length > 0 && (
+                {metadata.perImageTokens && metadata.perImageTokens.length > 0 && 
+                  metadata.perImageTokens.some(token => token.totalTokens > 0) && (
                   <Box sx={{ mt: 1, pt: 1, borderTop: `1px solid ${palette.divider}` }}>
-                    <Typography variant="caption" sx={{ color: palette.text.primary, fontWeight: 600, mb: 0.5, display: 'block' }}>
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        color: palette.grey[600], 
+                        fontWeight: 600, 
+                        mb: 0.5, 
+                        display: 'block',
+                        fontSize: '0.875rem',
+                      }}
+                    >
                       Per-Image Breakdown:
                     </Typography>
-                    {metadata.perImageTokens.map((imageToken) => (
+                    {metadata.perImageTokens
+                      .filter(imageToken => imageToken.totalTokens > 0)
+                      .map((imageToken) => (
                       <Stack key={imageToken.imageIndex} direction="row" spacing={1} sx={{ py: 0.3 }}>
-                        <Typography variant="caption" sx={{ color: palette.text.secondary, minWidth: 60 }}>
+                        <Typography 
+                          variant="body2" 
+                          sx={{ 
+                            color: palette.grey[500], 
+                            minWidth: 60,
+                            fontSize: '0.8rem',
+                          }}
+                        >
                           Image {imageToken.imageIndex}:
                         </Typography>
-                        <Typography variant="caption" sx={{ color: palette.text.disabled }}>
+                        <Typography 
+                          variant="body2" 
+                          sx={{ 
+                            color: palette.grey[400],
+                            fontSize: '0.8rem',
+                          }}
+                        >
                           {formatTokens(imageToken.totalTokens)} tokens
-                          {imageToken.promptTokens > 0 && imageToken.candidatesTokens > 0 && 
+                          {(imageToken.promptTokens > 0 && imageToken.candidatesTokens > 0) && 
                             ` (${formatTokens(imageToken.promptTokens)} + ${formatTokens(imageToken.candidatesTokens)})`
                           }
                         </Typography>
@@ -207,52 +283,77 @@ export function GenerationMetadataDisplay({ metadata, compact = false }: Generat
                 )}
               </Stack>
             </Box>
-          )}
+          ) : null}
 
           {/* Cost - only show if available */}
-          {metadata.estimatedCost && metadata.estimatedCost > 0 && (
-            <Box>
+          {(metadata.estimatedCost && metadata.estimatedCost > 0) ? (
+            <Box sx={{ mb: 0.5 }}>
               <Typography variant="body2" sx={{ fontWeight: 600, color: palette.success.main }}>
                 Estimated Cost
               </Typography>
-              <Typography variant="body2" sx={{ color: palette.text.secondary, pl: 3.5 }}>
+              <Typography 
+                variant="body2" 
+                sx={{ 
+                  color: palette.grey[500], 
+                  pl: 3.5,
+                  fontSize: '0.875rem',
+                }}
+              >
                 ${metadata.estimatedCost.toFixed(4)} USD
               </Typography>
             </Box>
-          )}
+          ) : null}
 
-          {/* Parameters */}
-          {metadata.parameters && Object.keys(metadata.parameters).length > 0 && (
+          {/* Parameters - only show if there are valid parameters after filtering */}
+          {hasParameters && (
             <Box>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <Settings sx={{ fontSize: '1.2rem', color: palette.info.main }} />
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                  Parameters
-                </Typography>
-              </Stack>
-              <Stack spacing={0.5} sx={{ pl: 3.5, maxHeight: 300, overflowY: 'auto' }}>
-                {Object.entries(metadata.parameters)
-                  .filter(([key, value]) => key !== 'prompt' && value && value !== '' && value !== 'undefined')
-                  .map(([key, value]) => {
-                    // Format key name to be more readable
-                    const formattedKey = key
-                      .replace(/([A-Z])/g, ' $1')
-                      .replace(/^./, (str) => str.toUpperCase())
-                      .trim()
-                    
-                    return (
-                      <Typography key={key} variant="caption" sx={{ color: palette.text.secondary }}>
-                        <strong>{formattedKey}:</strong> {String(value)}
-                      </Typography>
-                    )
-                  })}
-                {metadata.parameters.prompt && (
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 0, color: palette.grey[100] }}>
+                Parameters
+              </Typography>
+              <Stack spacing={0} sx={{ pl: 3.5, maxHeight: 300, overflowY: 'auto' }}>
+                {filteredParams.map(([key, value]) => {
+                  // Format key name to be more readable
+                  const formattedKey = key
+                    .replace(/([A-Z])/g, ' $1')
+                    .replace(/^./, (str) => str.toUpperCase())
+                    .trim()
+                  
+                  return (
+                    <Typography 
+                      key={key} 
+                      variant="body2" 
+                      sx={{ 
+                        color: palette.grey[500],
+                        fontSize: '0.875rem',
+                      }}
+                    >
+                      <strong>{formattedKey}:</strong> {String(value)}
+                    </Typography>
+                  )
+                })}
+                {hasPrompt && (
                   <Box sx={{ mt: 1, p: 1, bgcolor: palette.grey[100], borderRadius: 1 }}>
-                    <Typography variant="caption" sx={{ color: palette.text.primary, fontWeight: 500 }}>
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        color: palette.grey[600], 
+                        fontWeight: 500,
+                        fontSize: '0.875rem',
+                      }}
+                    >
                       Prompt:
                     </Typography>
-                    <Typography variant="caption" sx={{ color: palette.text.secondary, fontStyle: 'italic', display: 'block', mt: 0.5 }}>
-                      "{metadata.parameters.prompt}"
+                    <Typography 
+                      variant="body2" 
+                      sx={{ 
+                        color: palette.grey[500], 
+                        fontStyle: 'italic', 
+                        display: 'block', 
+                        mt: 0.5,
+                        fontSize: '0.875rem',
+                      }}
+                    >
+                      "{metadata.parameters?.prompt}"
                     </Typography>
                   </Box>
                 )}

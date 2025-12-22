@@ -142,6 +142,7 @@ export default function GenerateForm({
   const [orientation, setOrientation] = useState('horizontal')
 
   // --- Watched Form Values ---
+  const currentPrompt = watch('prompt')
   const referenceObjects = watch('referenceObjects')
   const referenceImages = watch('referenceImages')
   const isVideoWithAudio = watch('isVideoWithAudio')
@@ -153,6 +154,13 @@ export default function GenerateForm({
   const currentModel = watch('modelVersion')
   const currentPrimaryStyle = watch('style')
   const currentSecondaryStyle = watch('secondary_style')
+
+  // --- LocalStorage keys for caching (separated by generation type) ---
+  const STORAGE_KEY_PREFIX = generationType === 'Video' ? 'veo' : 'imagen'
+  const STORAGE_KEY_REFERENCE_IMAGES = `${STORAGE_KEY_PREFIX}_reference_images_cache`
+  const STORAGE_KEY_INTERPOL_FIRST = `${STORAGE_KEY_PREFIX}_interpol_first_cache`
+  const STORAGE_KEY_PROMPT = `${STORAGE_KEY_PREFIX}_prompt_cache`
+  const STORAGE_KEY_REFERENCE_OBJECTS = `${STORAGE_KEY_PREFIX}_reference_objects_cache`
 
   // --- Derived and Memoized Values ---
   // Determines if the form has any valid reference objects.
@@ -215,6 +223,75 @@ export default function GenerateForm({
   }, [currentPrimaryStyle, generationFields])
 
   // --- Side Effects ---
+  // Load cached data from localStorage on component mount or when switching tabs
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        // Load prompt cache
+        if (!initialPrompt) {
+          const cachedPrompt = localStorage.getItem(STORAGE_KEY_PROMPT)
+          if (cachedPrompt) {
+            console.log(`📦 Loading cached ${generationType} prompt`)
+            setValue('prompt', cachedPrompt)
+          }
+        }
+
+        if (generationType === 'Video') {
+          // Load reference images cache for Video
+          const currentRefImages = getValues('referenceImages') as ReferenceImageI[]
+          const currentHasImages = currentRefImages && currentRefImages.length > 0 && currentRefImages.some((img) => img.base64Image !== '')
+          
+          if (!currentHasImages && !initialPrompt) {
+            const cachedRefImages = localStorage.getItem(STORAGE_KEY_REFERENCE_IMAGES)
+            if (cachedRefImages) {
+              const parsedImages = JSON.parse(cachedRefImages) as ReferenceImageI[]
+              if (Array.isArray(parsedImages) && parsedImages.length > 0) {
+                const validImages = parsedImages.filter((img) => img.base64Image !== '')
+                if (validImages.length > 0) {
+                  console.log('📦 Loading cached reference images:', validImages.length)
+                  setValue('referenceImages', parsedImages)
+                }
+              }
+            }
+          }
+
+          // Load interpolation first image cache
+          const currentInterpolFirst = getValues('interpolImageFirst') as InterpolImageI
+          if (!initialITVimage && currentInterpolFirst && currentInterpolFirst.base64Image === '') {
+            const cachedInterpolFirst = localStorage.getItem(STORAGE_KEY_INTERPOL_FIRST)
+            if (cachedInterpolFirst) {
+              const parsedImage = JSON.parse(cachedInterpolFirst) as InterpolImageI
+              if (parsedImage.base64Image) {
+                console.log('📦 Loading cached ITV image')
+                setValue('interpolImageFirst', parsedImage)
+              }
+            }
+          }
+        } else if (generationType === 'Image') {
+          // Load reference objects cache for Image
+          const currentRefObjects = getValues('referenceObjects') as any[]
+          const currentHasObjects = currentRefObjects && currentRefObjects.length > 0 && currentRefObjects.some((obj) => obj.base64Image !== '')
+          
+          if (!currentHasObjects && !initialPrompt) {
+            const cachedRefObjects = localStorage.getItem(STORAGE_KEY_REFERENCE_OBJECTS)
+            if (cachedRefObjects) {
+              const parsedObjects = JSON.parse(cachedRefObjects)
+              if (Array.isArray(parsedObjects) && parsedObjects.length > 0) {
+                const validObjects = parsedObjects.filter((obj: any) => obj.base64Image !== '')
+                if (validObjects.length > 0) {
+                  console.log('📦 Loading cached reference objects:', validObjects.length)
+                  setValue('referenceObjects', parsedObjects)
+                }
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Error loading cached data:', error)
+      }
+    }
+  }, [generationType]) // Run when generation type changes (tab switch)
+
   // Manages accordion expansion based on initial image-to-video image.
   useEffect(() => {
     if (generationType === 'Video') {
@@ -225,6 +302,77 @@ export default function GenerateForm({
       else setExpanded(false) // Don't force any accordion, let user control
     }
   }, [initialITVimage, generationType])
+
+  // Save prompt to localStorage when it changes (for both Image and Video)
+  useEffect(() => {
+    if (typeof window !== 'undefined' && currentPrompt && currentPrompt.trim() !== '') {
+      try {
+        localStorage.setItem(STORAGE_KEY_PROMPT, currentPrompt)
+      } catch (error) {
+        console.error('Error saving prompt to cache:', error)
+      }
+    }
+  }, [currentPrompt, generationType, STORAGE_KEY_PROMPT])
+
+  // Save reference images to localStorage when they change (Video)
+  useEffect(() => {
+    if (generationType === 'Video' && typeof window !== 'undefined' && referenceImages.length > 0) {
+      try {
+        const hasValidImages = referenceImages.some((img) => img.base64Image !== '')
+        if (hasValidImages) {
+          localStorage.setItem(STORAGE_KEY_REFERENCE_IMAGES, JSON.stringify(referenceImages))
+        }
+      } catch (error) {
+        console.error('Error saving reference images to cache:', error)
+        // If localStorage is full, try to clear old data
+        try {
+          localStorage.removeItem(STORAGE_KEY_REFERENCE_IMAGES)
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+    }
+  }, [referenceImages, generationType, STORAGE_KEY_REFERENCE_IMAGES])
+
+  // Save reference objects to localStorage when they change (Image)
+  useEffect(() => {
+    if (generationType === 'Image' && typeof window !== 'undefined' && referenceObjects && referenceObjects.length > 0) {
+      try {
+        const hasValidObjects = referenceObjects.some((obj) => obj.base64Image !== '')
+        if (hasValidObjects) {
+          localStorage.setItem(STORAGE_KEY_REFERENCE_OBJECTS, JSON.stringify(referenceObjects))
+        }
+      } catch (error) {
+        console.error('Error saving reference objects to cache:', error)
+        try {
+          localStorage.removeItem(STORAGE_KEY_REFERENCE_OBJECTS)
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+    }
+  }, [referenceObjects, generationType, STORAGE_KEY_REFERENCE_OBJECTS])
+
+  // Save interpolation first image to localStorage when it changes
+  useEffect(() => {
+    if (
+      generationType === 'Video' &&
+      typeof window !== 'undefined' &&
+      interpolImageFirst.base64Image !== ''
+    ) {
+      try {
+        localStorage.setItem(STORAGE_KEY_INTERPOL_FIRST, JSON.stringify(interpolImageFirst))
+      } catch (error) {
+        console.error('Error saving interpolation image to cache:', error)
+        // If localStorage is full, try to clear old data
+        try {
+          localStorage.removeItem(STORAGE_KEY_INTERPOL_FIRST)
+        } catch (e) {
+          // Ignore cleanup errors
+        }
+      }
+    }
+  }, [interpolImageFirst, generationType, STORAGE_KEY_INTERPOL_FIRST])
 
   // Sets the model version to the default for the selected options.
   useEffect(() => {
@@ -372,8 +520,19 @@ export default function GenerateForm({
   // Removes a reference image from the form (for video generation).
   const removeReferenceImage = (imageKey: string) => {
     const updatedReferenceImages = referenceImages.filter((img) => img.imageKey !== imageKey)
-    if (updatedReferenceImages.length === 0) setValue('referenceImages', [])
-    else setValue('referenceImages', updatedReferenceImages)
+    if (updatedReferenceImages.length === 0) {
+      setValue('referenceImages', [])
+      // Clear cache when all images are removed
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem(STORAGE_KEY_REFERENCE_IMAGES)
+        } catch (error) {
+          console.error('Error clearing cache:', error)
+        }
+      }
+    } else {
+      setValue('referenceImages', updatedReferenceImages)
+    }
   }
 
   // Adds a new reference image to the form (for video generation).
@@ -430,6 +589,16 @@ export default function GenerateForm({
       setValue('interpolImageFirst', generationFields.defaultValues.interpolImageFirst)
       setValue('interpolImageLast', generationFields.defaultValues.interpolImageLast)
       setValue('referenceImages', [])
+      
+      // Clear localStorage cache
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.removeItem(STORAGE_KEY_REFERENCE_IMAGES)
+          localStorage.removeItem(STORAGE_KEY_INTERPOL_FIRST)
+        } catch (error) {
+          console.error('Error clearing cache:', error)
+        }
+      }
     }
 
     setOrientation('horizontal')
@@ -738,9 +907,15 @@ export default function GenerateForm({
                     </Typography>
                     <Typography
                       variant="body2"
-                      sx={{ color: palette.info.main, fontSize: '0.8rem', pb: 2, fontWeight: 400 }}
+                      sx={{ color: palette.info.main, fontSize: '0.8rem', pb: 1, fontWeight: 400 }}
                     >
                       ℹ️ Use this when you have a specific starting/ending frame. For style/character consistency across the video, use Reference Images (Veo 3.1 only) instead.
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      sx={{ color: palette.success.main, fontSize: '0.75rem', pb: 2, fontWeight: 400 }}
+                    >
+                      💾 Your uploaded image is automatically saved in browser storage.
                     </Typography>
                     <Stack
                       direction="row"
@@ -797,9 +972,15 @@ export default function GenerateForm({
                     </Typography>
                     <Typography
                       variant="body2"
-                      sx={{ color: palette.info.main, fontSize: '0.8rem', pb: 2, fontWeight: 400 }}
+                      sx={{ color: palette.info.main, fontSize: '0.8rem', pb: 1, fontWeight: 400 }}
                     >
                       ℹ️ Use this when you have a specific starting frame. For style/character consistency across the video, use Reference Images (Veo 3.1 only) instead.
+                    </Typography>
+                    <Typography
+                      variant="body2"
+                      sx={{ color: palette.success.main, fontSize: '0.75rem', pb: 2, fontWeight: 400 }}
+                    >
+                      💾 Your uploaded image is automatically saved in browser storage.
                     </Typography>
                     <Stack
                       direction="row"
@@ -864,9 +1045,15 @@ export default function GenerateForm({
                 </Typography>
                 <Typography
                   variant="body2"
-                  sx={{ color: palette.info.main, fontSize: '0.8rem', pb: 2, fontWeight: 400 }}
+                  sx={{ color: palette.info.main, fontSize: '0.8rem', pb: 1, fontWeight: 400 }}
                 >
                   ⚠️ Cannot be used together with Image-to-Video. Choose one: Use Reference Images for style/character consistency, or Image-to-Video to animate a specific static image.
+                </Typography>
+                <Typography
+                  variant="body2"
+                  sx={{ color: palette.success.main, fontSize: '0.75rem', pb: 2, fontWeight: 400 }}
+                >
+                  💾 Your uploaded images are automatically saved in browser storage and will persist across page refreshes.
                 </Typography>
                 <Stack
                   direction="column"

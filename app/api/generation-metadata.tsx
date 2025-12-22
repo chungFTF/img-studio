@@ -39,9 +39,9 @@ export interface GenerationMetadata {
     inputTokens?: number
     outputTokens?: number
     totalTokens?: number
-    executionTimeMs: number
-    startTime: string
-    endTime: string
+    executionTimeMs?: number
+    startTime?: string
+    endTime?: string
   }
   cost?: {
     estimatedCost?: number
