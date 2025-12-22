@@ -192,9 +192,11 @@ export default function EditForm({
           {
             prompt: formData.prompt,
             modelVersion: formData.modelVersion,
-            sampleCount: '1', // Gemini only supports 1 image at a time
+            sampleCount: formData.sampleCount, // Now supports multiple images
             inputImage: formData.inputImage,
             negativePrompt: formData.negativePrompt,
+            width: formData.width,
+            height: formData.height,
           },
           appContext
         )

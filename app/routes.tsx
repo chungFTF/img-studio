@@ -31,4 +31,10 @@ export const pages = {
     href: '/library',
     status: 'true',
   },
+  History: {
+    name: 'History',
+    description: 'View your generation history with detailed metadata',
+    href: '/history',
+    status: 'true',
+  },
 }
