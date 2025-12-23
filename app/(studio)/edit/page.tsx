@@ -22,6 +22,8 @@ import { ImageI } from '../../api/generate-image-utils'
 import OutputImagesDisplay from '../../ui/transverse-components/ImagenOutputImagesDisplay'
 import { useAppContext } from '../../context/app-context'
 import { Typography } from '@mui/material'
+import { saveGenerationMetadata, GenerationMetadata } from '@/app/api/generation-metadata'
+import { uploadMetadataJSON } from '@/app/api/cloud-storage/action'
 
 import theme from '../../theme'
 import EditForm from '@/app/ui/edit-components/EditForm'
@@ -36,9 +38,67 @@ export default function Page() {
   const [editedCount, setEditedCount] = useState<number>(0)
   const [isUpscaledDLAvailable, setIsUpscaleDLAvailable] = useState(true)
 
-  const handleImageGeneration = (newImages: ImageI[]) => {
+  const handleImageGeneration = async (newImages: ImageI[]) => {
     setEditedImagesInGCS(newImages)
     setIsEditLoading(false)
+    
+    // Save to history
+    await saveImagesToHistory(newImages)
+  }
+
+  const saveImagesToHistory = async (images: ImageI[]) => {
+    if (!images || images.length === 0) return
+
+    try {
+      for (const image of images) {
+        const metadata: GenerationMetadata = {
+          id: image.key || `edit_${Date.now()}`,
+          type: 'image',
+          model: image.modelVersion || 'unknown',
+          prompt: image.prompt || '',
+          timestamp: new Date().toISOString(),
+          outputs: [{
+            url: image.src,
+            gcsUri: image.gcsUri,
+            format: image.format || 'png',
+            width: image.width,
+            height: image.height,
+          }],
+          parameters: {
+            mode: image.mode || 'Edited',
+            width: image.width?.toString() || '',
+            height: image.height?.toString() || '',
+            ratio: image.ratio || '',
+          },
+          performance: {},
+          cost: {},
+        }
+
+        // Save to local history
+        await saveGenerationMetadata(metadata)
+
+        // Upload metadata to GCS
+        if (image.gcsUri) {
+          const bucketName = image.gcsUri.split('/')[2]
+          const objectPath = image.gcsUri.split('/').slice(3).join('/')
+          const metadataPath = objectPath.replace(/\.(png|jpg|jpeg|webp)$/, '.json')
+
+          const gcsMetadata = {
+            type: 'image',
+            model: image.modelVersion || 'unknown',
+            prompt: image.prompt || '',
+            timestamp: new Date().toISOString(),
+            parameters: metadata.parameters,
+            performance: metadata.performance,
+            cost: metadata.cost,
+          }
+
+          await uploadMetadataJSON(gcsMetadata, bucketName, metadataPath)
+        }
+      }
+    } catch (error) {
+      console.error('Error saving edited images to history:', error)
+    }
   }
 
   const handleRequestSent = (valid: boolean, count: number, isUpscaledDLAvailable: boolean) => {

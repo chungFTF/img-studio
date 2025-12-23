@@ -591,8 +591,8 @@ export default function HistoryPage() {
                         }}
                       />
                     </Stack>
-                    <IconButton size="small" color="error" onClick={() => handleDelete(item.id)} sx={{ flexShrink: 0 }}>
-                      <Delete sx={{ fontSize: '1.8rem' }} />
+                    <IconButton size="small" color="error" onClick={() => handleDelete(item.id)} sx={{ flexShrink: 0, ml: 13 }}>
+                      <Delete sx={{ fontSize: '1.2rem' }} />
                     </IconButton>
                   </Stack>
 
