@@ -18,6 +18,7 @@ import { ThemeProvider } from '@mui/material/styles'
 import CssBaseline from '@mui/material/CssBaseline'
 import theme from './theme'
 import { ContextProvider } from './context/app-context'
+import { GoogleDriveProvider } from './context/google-drive-context'
 import './globals.css'
 
 export const metadata = {
@@ -33,12 +34,14 @@ export default function RootLayout(props: { children: React.ReactNode }) {
       </head>
       <body>
         <ContextProvider>
+          <GoogleDriveProvider>
           <AppRouterCacheProvider options={{ enableCssLayer: true }}>
             <ThemeProvider theme={theme}>
               <CssBaseline />
               {props.children}
             </ThemeProvider>
           </AppRouterCacheProvider>
+          </GoogleDriveProvider>
         </ContextProvider>
       </body>
     </html>

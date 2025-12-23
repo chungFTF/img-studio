@@ -4,7 +4,8 @@
     "build": "next build",
     "dev": "next dev",
     "start": "next start",
-    "generate-third-party": "node generate-third-party.js"
+    "generate-third-party": "node generate-third-party.js",
+    "check-gdrive": "node check-gdrive-config.js"
   },
   "dependencies": {
     "@emotion/cache": "latest",

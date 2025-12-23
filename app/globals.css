@@ -21,4 +21,11 @@
 @import '@fontsource/roboto/900.css'; /* Black 900 */
 @import '@fontsource/roboto/500.css'; /* Medium 500 */
 
+/* Google Picker z-index fix - 确保 Picker 显示在所有元素上方 */
+.picker-dialog {
+  z-index: 10000 !important;
+}
 
+.picker-dialog-bg {
+  z-index: 9999 !important;
+}

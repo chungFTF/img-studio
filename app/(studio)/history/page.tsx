@@ -33,13 +33,15 @@ import {
   Dialog,
   DialogContent,
 } from '@mui/material'
-import { Delete, Image as ImageIcon, VideoLibrary, CloudDownload, PlayCircleOutline, Close, Fullscreen, DeleteSweep, ClearAll } from '@mui/icons-material'
+import { Delete, Image as ImageIcon, VideoLibrary, CloudDownload, PlayCircleOutline, Close, Fullscreen, DeleteSweep, ClearAll, CloudUpload } from '@mui/icons-material'
 
 import theme from '../../theme'
 import { loadGenerationHistory, deleteGenerationSession, GenerationMetadata, saveGenerationMetadata, clearAllHistory } from '../../api/generation-metadata'
-import { listFilesFromGCS, getSignedURL, readMetadataJSON } from '../../api/cloud-storage/action'
+import { listFilesFromGCS, getSignedURL, readMetadataJSON, downloadMediaFromGcs } from '../../api/cloud-storage/action'
 import LoadingAnimation from '../../ui/ux-components/LoadingAnimation'
 import GenerationMetadataDisplay from '../../ui/ux-components/GenerationMetadataDisplay'
+import GoogleDriveSaveDialog from '../../ui/transverse-components/GoogleDriveSaveDialog'
+import { useGoogleDrive } from '../../context/google-drive-context'
 
 const { palette } = theme
 
@@ -62,6 +64,12 @@ export default function HistoryPage() {
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
+  
+  // Google Drive save dialog state
+  const [driveDialogOpen, setDriveDialogOpen] = useState(false)
+  const [selectedFileForDrive, setSelectedFileForDrive] = useState<{ url: string; fileName: string; fileData: string } | null>(null)
+  const [loadingFileData, setLoadingFileData] = useState(false)
+  const { accessToken } = useGoogleDrive()
   const ITEMS_PER_PAGE = 6
 
   useEffect(() => {
@@ -143,6 +151,60 @@ export default function HistoryPage() {
     } else {
       alert(`Failed to delete: ${result.error}`)
     }
+  }
+
+  const handleSaveToDrive = async (gcsUri: string, fileName: string, itemType: 'image' | 'video', format?: string) => {
+    if (!accessToken) {
+      alert('Please connect to Google Drive first')
+      return
+    }
+
+    if (!gcsUri || !gcsUri.startsWith('gs://')) {
+      alert('Invalid file source. GCS URI is required.')
+      return
+    }
+
+    setLoadingFileData(true)
+    try {
+      // Download file from GCS server-side to avoid CORS issues
+      const result = await downloadMediaFromGcs(gcsUri)
+      
+      if (result.error || !result.data) {
+        throw new Error(result.error || 'Failed to download file from GCS')
+      }
+
+      // Determine MIME type from file extension or item type
+      const getMimeType = (): string => {
+        const ext = format || fileName.split('.').pop()?.toLowerCase()
+        if (itemType === 'video') {
+          if (ext === 'mp4') return 'video/mp4'
+          if (ext === 'mov') return 'video/quicktime'
+          if (ext === 'webm') return 'video/webm'
+          return 'video/mp4' // default
+        } else {
+          if (ext === 'png') return 'image/png'
+          if (ext === 'jpg' || ext === 'jpeg') return 'image/jpeg'
+          if (ext === 'webp') return 'image/webp'
+          return 'image/png' // default
+        }
+      }
+      
+      const mimeType = getMimeType()
+      const fileData = `data:${mimeType};base64,${result.data}`
+      
+      setSelectedFileForDrive({ url: gcsUri, fileName, fileData })
+      setDriveDialogOpen(true)
+    } catch (error) {
+      console.error('Error loading file for Drive:', error)
+      alert('Failed to load file for Google Drive upload: ' + (error instanceof Error ? error.message : String(error)))
+    } finally {
+      setLoadingFileData(false)
+    }
+  }
+
+  const handleCloseDriveDialog = () => {
+    setDriveDialogOpen(false)
+    setSelectedFileForDrive(null)
   }
 
   const handleClearImported = async () => {
@@ -318,8 +380,8 @@ export default function HistoryPage() {
     <Box sx={{ p: 5, maxWidth: 2000, margin: '0 auto' }}>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
         <Typography variant="h3" sx={{ fontWeight: 600, color: palette.primary.main }}>
-          Generation History
-        </Typography>
+        Generation History
+      </Typography>
         <Stack direction="row" spacing={2}>
           <IconButton
             onClick={async () => {
@@ -433,7 +495,7 @@ export default function HistoryPage() {
         </Box>
       ) : (
         <>
-          <Grid container spacing={3}>
+        <Grid container spacing={3}>
             {displayedHistory.map((item) => {
               const mediaUrl = item.outputs[0]?.url || signedUrls[item.id]
               const isVideo = item.type === 'video'
@@ -441,20 +503,20 @@ export default function HistoryPage() {
               
               return (
                 <Grid item xs={12} sm={6} md={6} lg={4} key={item.id}>
-                <Card
-                  sx={{
-                    height: '100%',
-                    display: 'flex',
-                    flexDirection: 'column',
+              <Card
+                sx={{
+                  height: '100%',
+                  display: 'flex',
+                  flexDirection: 'column',
                     backgroundColor: palette.background.paper,
-                    transition: 'transform 0.2s, box-shadow 0.2s',
-                    '&:hover': {
-                      transform: 'translateY(-4px)',
-                      boxShadow: 4,
-                    },
-                  }}
-                >
-                  {item.outputs[0] && (
+                  transition: 'transform 0.2s, box-shadow 0.2s',
+                  '&:hover': {
+                    transform: 'translateY(-4px)',
+                    boxShadow: 4,
+                  },
+                }}
+              >
+                {item.outputs[0] && (
                     <Box
                       sx={{
                         position: 'relative',
@@ -542,7 +604,7 @@ export default function HistoryPage() {
                         >
                           <img
                             src={mediaUrl}
-                            alt={item.prompt}
+                    alt={item.prompt}
                             style={{
                               width: '100%',
                               height: '100%',
@@ -554,7 +616,7 @@ export default function HistoryPage() {
                         </Box>
                       )}
                     </Box>
-                  )}
+                )}
 
                 <CardContent sx={{ 
                   flexGrow: 1, 
@@ -566,18 +628,18 @@ export default function HistoryPage() {
                 }}>
                   <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
                     <Stack direction="row" spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
-                      <Chip
-                        label={item.type}
-                        size="small"
-                        icon={item.type === 'video' ? <VideoLibrary /> : <ImageIcon />}
-                        color={item.type === 'video' ? 'secondary' : 'primary'}
+                    <Chip
+                      label={item.type}
+                      size="small"
+                      icon={item.type === 'video' ? <VideoLibrary /> : <ImageIcon />}
+                      color={item.type === 'video' ? 'secondary' : 'primary'}
                         sx={{ 
                           fontSize: '0.95rem',
                           height: 24,
                           '& .MuiChip-label': { px: 1 },
                           '& .MuiChip-icon': { fontSize: '1rem' }
                         }}
-                      />
+                    />
                       <Chip 
                         label={item.model} 
                         size="small" 
@@ -591,27 +653,48 @@ export default function HistoryPage() {
                         }}
                       />
                     </Stack>
-                    <IconButton size="small" color="error" onClick={() => handleDelete(item.id)} sx={{ flexShrink: 0, ml: 13 }}>
-                      <Delete sx={{ fontSize: '1.2rem' }} />
-                    </IconButton>
+                    <Stack direction="row" spacing={1} sx={{ flexShrink: 0, ml: 13 }}>
+                      <IconButton 
+                        size="small" 
+                        color="primary" 
+                        onClick={() => {
+                          const gcsUri = item.outputs[0]?.gcsUri
+                          if (gcsUri) {
+                            handleSaveToDrive(
+                              gcsUri,
+                              `${item.type}_${item.model}_${new Date(item.timestamp).toISOString().split('T')[0]}.${item.outputs[0]?.format || (item.type === 'video' ? 'mp4' : 'png')}`,
+                              item.type,
+                              item.outputs[0]?.format
+                            )
+                          }
+                        }}
+                        disabled={!item.outputs[0]?.gcsUri || loadingFileData}
+                        sx={{ flexShrink: 0 }}
+                      >
+                        <CloudUpload sx={{ fontSize: '1.2rem' }} />
+                      </IconButton>
+                      <IconButton size="small" color="error" onClick={() => handleDelete(item.id)} sx={{ flexShrink: 0 }}>
+                        <Delete sx={{ fontSize: '1.2rem' }} />
+                      </IconButton>
+                    </Stack>
                   </Stack>
 
                   {item.prompt && (
-                    <Typography
-                      variant="body2"
-                      sx={{
+                  <Typography
+                    variant="body2"
+                    sx={{
                         mb: 1,
                         mt: 0.5,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
                         color: palette.grey[500],
-                      }}
-                    >
-                      {item.prompt}
-                    </Typography>
+                    }}
+                  >
+                    {item.prompt}
+                  </Typography>
                   )}
 
                   {/* Date only */}
@@ -623,8 +706,8 @@ export default function HistoryPage() {
                       mt: item.prompt ? 1 : 0.5,
                     }}
                   >
-                    {new Date(item.timestamp).toLocaleString()}
-                  </Typography>
+                      {new Date(item.timestamp).toLocaleString()}
+                    </Typography>
 
                   <GenerationMetadataDisplay
                     metadata={{
@@ -636,7 +719,7 @@ export default function HistoryPage() {
               </Card>
             </Grid>
           )})}
-          </Grid>
+        </Grid>
 
           {/* Loading indicator for current page */}
           {loadingUrls && (
@@ -772,6 +855,17 @@ export default function HistoryPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Google Drive Save Dialog */}
+      {selectedFileForDrive && accessToken && (
+        <GoogleDriveSaveDialog
+          open={driveDialogOpen}
+          onClose={handleCloseDriveDialog}
+          accessToken={accessToken}
+          fileName={selectedFileForDrive.fileName}
+          fileData={selectedFileForDrive.fileData}
+        />
+      )}
     </Box>
   )
 }
