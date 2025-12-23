@@ -33,11 +33,11 @@ import {
   Dialog,
   DialogContent,
 } from '@mui/material'
-import { Delete, Image as ImageIcon, VideoLibrary, CloudDownload, PlayCircleOutline, Close, Fullscreen, DeleteSweep } from '@mui/icons-material'
+import { Delete, Image as ImageIcon, VideoLibrary, CloudDownload, PlayCircleOutline, Close, Fullscreen, DeleteSweep, ClearAll } from '@mui/icons-material'
 
 import theme from '../../theme'
-import { loadGenerationHistory, deleteGenerationSession, GenerationMetadata, saveGenerationMetadata } from '../../api/generation-metadata'
-import { listFilesFromGCS, getSignedURL } from '../../api/cloud-storage/action'
+import { loadGenerationHistory, deleteGenerationSession, GenerationMetadata, saveGenerationMetadata, clearAllHistory } from '../../api/generation-metadata'
+import { listFilesFromGCS, getSignedURL, readMetadataJSON } from '../../api/cloud-storage/action'
 import LoadingAnimation from '../../ui/ux-components/LoadingAnimation'
 import GenerationMetadataDisplay from '../../ui/ux-components/GenerationMetadataDisplay'
 
@@ -124,6 +124,7 @@ export default function HistoryPage() {
     const result = await loadGenerationHistory()
 
     if (result.success && result.data) {
+      // Server already returns only the 30 most recent records
       setHistory(result.data)
     } else {
       setError(result.error || 'Failed to load history')
@@ -170,7 +171,7 @@ export default function HistoryPage() {
     if (!confirm('Import past generations from GCS bucket? This may take a while.')) return
 
     setIsImporting(true)
-    setImportMessage('Loading files from GCS bucket...')
+    setImportMessage('📥 Loading the 30 most recent files from GCS...')
 
     try {
       // List all files from GCS
@@ -182,8 +183,13 @@ export default function HistoryPage() {
         return
       }
 
-      const files = result.files
-      setImportMessage(`Found ${files.length} files. Creating history entries...`)
+      // Sort files by updated time (newest first) and take only the first 30
+      const allFiles = result.files.sort((a: any, b: any) => 
+        new Date(b.updated).getTime() - new Date(a.updated).getTime()
+      )
+      const files = allFiles.slice(0, 30)
+      
+      setImportMessage(`📥 Importing ${files.length} most recent files...`)
 
       let importedCount = 0
       let skippedCount = 0
@@ -199,16 +205,36 @@ export default function HistoryPage() {
 
           const isVideo = file.contentType.startsWith('video/')
 
-          // Create a simple metadata entry
+          // Try to read metadata JSON file
+          let gcsMetadata = null
+          try {
+            // Replace file extension with .json to find metadata file
+            const jsonUri = file.gcsUri.replace(/\.(png|jpg|jpeg|webp|mp4|mov|webm)$/i, '.json')
+            const metadataResult = await readMetadataJSON(jsonUri)
+            if (metadataResult.success && metadataResult.data) {
+              gcsMetadata = metadataResult.data
+              console.log(`📖 Found metadata for ${file.name}:`, gcsMetadata)
+            }
+          } catch (error) {
+            console.log(`No metadata found for ${file.name}, using defaults`)
+          }
+
+          // Create a metadata entry with data from GCS metadata if available
           const metadata: GenerationMetadata = {
             id: `imported_${Date.parse(file.updated)}_${Math.random().toString(36).substring(7)}`,
             timestamp: file.updated,
             type: isVideo ? 'video' : 'image',
-            model: isVideo ? 'veo' : 'imagen',
-            prompt: '',
+            model: gcsMetadata?.model || (isVideo ? 'veo' : 'imagen'),
+            prompt: gcsMetadata?.prompt || '',
             parameters: {
               imported: true,
               originalPath: file.name,
+              // Include all parameters from GCS metadata
+              ...(gcsMetadata?.parameters || {}),
+              // Also include top-level parameters for backward compatibility
+              ...(gcsMetadata?.aspectRatio && { aspectRatio: gcsMetadata.aspectRatio }),
+              ...(gcsMetadata?.resolution && { resolution: gcsMetadata.resolution }),
+              ...(gcsMetadata?.duration && { duration: `${gcsMetadata.duration}s` }),
             },
             outputs: [
               {
@@ -221,11 +247,19 @@ export default function HistoryPage() {
               },
             ],
             performance: {
-              // Don't include executionTimeMs, totalTokens etc for imported items
-              // to prevent displaying zeros
-              startTime: file.updated,
-              endTime: file.updated,
+              // Use complete performance data from GCS if available
+              ...(gcsMetadata?.performance?.tokensUsed && { tokensUsed: gcsMetadata.performance.tokensUsed }),
+              ...(gcsMetadata?.performance?.inputTokens && { inputTokens: gcsMetadata.performance.inputTokens }),
+              ...(gcsMetadata?.performance?.outputTokens && { outputTokens: gcsMetadata.performance.outputTokens }),
+              ...(gcsMetadata?.performance?.totalTokens && { totalTokens: gcsMetadata.performance.totalTokens }),
+              ...(gcsMetadata?.performance?.executionTimeMs && { executionTimeMs: gcsMetadata.performance.executionTimeMs }),
+              startTime: gcsMetadata?.performance?.startTime || gcsMetadata?.timestamp || file.updated,
+              endTime: gcsMetadata?.performance?.endTime || gcsMetadata?.timestamp || file.updated,
             },
+            cost: gcsMetadata?.performance?.estimatedCost ? {
+              estimatedCost: gcsMetadata.performance.estimatedCost,
+              currency: 'USD',
+            } : undefined,
           }
 
           const saveResult = await saveGenerationMetadata(metadata)
@@ -287,6 +321,36 @@ export default function HistoryPage() {
           Generation History
         </Typography>
         <Stack direction="row" spacing={2}>
+          <IconButton
+            onClick={async () => {
+              if (window.confirm('Clear all cached data and generation history?\n\nThis will:\n- Clear localStorage (prompts, images, recent generations)\n- Delete all generation history records\n- Reload the page')) {
+                try {
+                  // Clear localStorage
+                  localStorage.clear()
+                  
+                  // Clear server-side history
+                  const result = await clearAllHistory()
+                  
+                  if (result.success) {
+                    window.location.reload()
+                  } else {
+                    alert(`Failed to clear history: ${result.error}`)
+                  }
+                } catch (error) {
+                  console.error('Error clearing all data:', error)
+                  alert('Failed to clear all data')
+                }
+              }
+            }}
+            sx={{
+              bgcolor: palette.warning.main,
+              color: 'white',
+              '&:hover': { bgcolor: palette.warning.dark },
+            }}
+            title="Clear all cache and history"
+          >
+            <ClearAll />
+          </IconButton>
           <IconButton
             onClick={handleClearImported}
             sx={{

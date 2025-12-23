@@ -120,7 +120,7 @@ export async function saveMediaToLocal(
   }
 }
 
-// Load all generation history
+// Load all generation history (limited to most recent 30)
 export async function loadGenerationHistory(): Promise<{ success: boolean; data?: GenerationMetadata[]; error?: string }> {
   try {
     const historyDir = getHistoryDir()
@@ -134,9 +134,28 @@ export async function loadGenerationHistory(): Promise<{ success: boolean; data?
     }
     
     const sessions = await fs.readdir(historyDir)
-    const metadataList: GenerationMetadata[] = []
+    
+    // Get session folder stats to sort by modification time
+    const sessionStats: Array<{ sessionId: string; mtime: Date }> = []
     
     for (const sessionId of sessions) {
+      try {
+        const sessionPath = path.join(historyDir, sessionId)
+        const stats = await fs.stat(sessionPath)
+        sessionStats.push({ sessionId, mtime: stats.mtime })
+      } catch (error) {
+        console.warn(`Failed to stat session ${sessionId}:`, error)
+      }
+    }
+    
+    // Sort by modification time (newest first) and take only the first 30
+    sessionStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime())
+    const recentSessions = sessionStats.slice(0, 30)
+    
+    const metadataList: GenerationMetadata[] = []
+    
+    // Only read metadata for the 30 most recent sessions
+    for (const { sessionId } of recentSessions) {
       const metadataPath = path.join(historyDir, sessionId, 'metadata.json')
       try {
         const content = await fs.readFile(metadataPath, 'utf-8')
@@ -149,6 +168,8 @@ export async function loadGenerationHistory(): Promise<{ success: boolean; data?
     
     // Sort by timestamp (newest first)
     metadataList.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+    
+    console.log(`📋 Loaded ${metadataList.length} most recent records (out of ${sessions.length} total sessions)`)
     
     return { success: true, data: metadataList }
   } catch (error) {
@@ -203,6 +224,35 @@ export async function deleteGenerationSession(sessionId: string): Promise<{ succ
     return { success: true }
   } catch (error) {
     console.error('Failed to delete generation session:', error)
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error' 
+    }
+  }
+}
+
+// Clear all generation history
+export async function clearAllHistory(): Promise<{ success: boolean; error?: string }> {
+  try {
+    const historyDir = getHistoryDir()
+    
+    // Check if directory exists
+    try {
+      await fs.access(historyDir)
+    } catch {
+      // Directory doesn't exist, nothing to clear
+      return { success: true }
+    }
+    
+    // Remove the entire history directory
+    await fs.rm(historyDir, { recursive: true, force: true })
+    
+    // Recreate the directory
+    await fs.mkdir(historyDir, { recursive: true })
+    
+    return { success: true }
+  } catch (error) {
+    console.error('Failed to clear all history:', error)
     return { 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 

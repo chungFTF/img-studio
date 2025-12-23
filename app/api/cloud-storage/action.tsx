@@ -252,6 +252,71 @@ export async function uploadBase64Image(
   }
 }
 
+// Upload JSON metadata to GCS
+export async function uploadMetadataJSON(
+  metadata: any,
+  bucketName: string,
+  objectName: string
+): Promise<{ success?: boolean; message?: string; error?: string; fileUrl?: string }> {
+  const storage = new Storage({ projectId })
+
+  if (!metadata) return { error: 'Invalid metadata.' }
+
+  const jsonString = JSON.stringify(metadata, null, 2)
+  const jsonBuffer = Buffer.from(jsonString, 'utf-8')
+  const options = {
+    destination: objectName,
+    metadata: {
+      contentType: 'application/json',
+    },
+  }
+
+  try {
+    await storage.bucket(bucketName).file(objectName).save(jsonBuffer, options)
+
+    const fileUrl = `gs://${bucketName}/${objectName}`
+
+    return {
+      success: true,
+      message: `Metadata uploaded to: ${fileUrl}`,
+      fileUrl: fileUrl,
+    }
+  } catch (error) {
+    console.error('Error uploading metadata:', error)
+    return {
+      error: 'Error uploading metadata to Google Cloud Storage.',
+    }
+  }
+}
+
+// Read JSON metadata from GCS
+export async function readMetadataJSON(gcsUri: string): Promise<{ success: boolean; data?: any; error?: string }> {
+  const storage = new Storage({ projectId })
+
+  try {
+    const { bucketName, fileName } = await decomposeUri(gcsUri)
+    const bucket = storage.bucket(bucketName)
+    const file = bucket.file(fileName)
+
+    // Check if file exists
+    const [exists] = await file.exists()
+    if (!exists) {
+      return { success: false, error: 'Metadata file not found' }
+    }
+
+    const [contents] = await file.download()
+    const jsonData = JSON.parse(contents.toString())
+
+    return { success: true, data: jsonData }
+  } catch (error) {
+    console.error('Error reading metadata from GCS:', error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    }
+  }
+}
+
 export async function getVideoThumbnailBase64(
   videoSourceGcsUri: string,
   ratio: string

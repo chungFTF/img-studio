@@ -164,7 +164,7 @@ export function GenerationMetadataDisplay({ metadata, compact = false }: Generat
             <Box sx={{ mb: 0.5 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.25 }}>
                 {/* <AccessTime sx={{ fontSize: '1.2rem', color: palette.primary.main }} /> */}
-                <Typography variant="body2" sx={{ fontWeight: 600, color: palette.grey[100] }}>
+                <Typography variant="body2" sx={{ fontWeight: 600, color: palette.grey[400] }}>
                   Execution Time
                 </Typography>
               </Stack>
@@ -197,8 +197,8 @@ export function GenerationMetadataDisplay({ metadata, compact = false }: Generat
           {(metadata.totalTokens && metadata.totalTokens > 0) ? (
             <Box sx={{ mb: 0.5 }}>
               <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.25 }}>
-                <Token sx={{ fontSize: '1.2rem', color: palette.secondary.main }} />
-                <Typography variant="body2" sx={{ fontWeight: 600 }}>
+
+                <Typography variant="body2" sx={{ fontWeight: 600, color: palette.grey[400] }}>
                   Token Usage
                 </Typography>
               </Stack>
@@ -307,7 +307,7 @@ export function GenerationMetadataDisplay({ metadata, compact = false }: Generat
           {/* Parameters - only show if there are valid parameters after filtering */}
           {hasParameters && (
             <Box>
-              <Typography variant="body2" sx={{ fontWeight: 600, mb: 0, color: palette.grey[100] }}>
+              <Typography variant="body2" sx={{ fontWeight: 600, mb: 0, color: palette.grey[400] }}>
                 Parameters
               </Typography>
               <Stack spacing={0} sx={{ pl: 3.5, maxHeight: 300, overflowY: 'auto' }}>

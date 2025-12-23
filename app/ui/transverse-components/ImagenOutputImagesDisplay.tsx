@@ -266,7 +266,7 @@ export default function OutputImagesDisplay({
         
         {/* Display metadata once below all images */}
         {!isLoading && generatedImagesInGCS.length > 0 && generatedImagesInGCS[0]?.metadata && (
-          <Box sx={{ mt: 2, px: 2 }}>
+          <Box sx={{ mt: 2, mb: 24, px: 2 }}>
             <GenerationMetadataDisplay metadata={generatedImagesInGCS[0].metadata} />
           </Box>
         )}

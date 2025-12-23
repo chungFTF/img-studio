@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react'
 import Grid from '@mui/material/Grid2'
 import Box from '@mui/material/Box'
 import { Typography, Dialog, DialogContent, IconButton, Chip, Stack } from '@mui/material'
-import { PlayCircleOutline, Close, Fullscreen } from '@mui/icons-material'
+import { PlayCircleOutline, Close, Fullscreen, ClearAll } from '@mui/icons-material'
 
 import GenerateForm from '../../ui/generate-components/GenerateForm'
 import OutputImagesDisplay from '../../ui/transverse-components/ImagenOutputImagesDisplay'
@@ -36,7 +36,7 @@ import {
   VideoRandomPrompts,
 } from '@/app/api/generate-video-utils'
 import { getVideoGenerationStatus } from '@/app/api/veo/action'
-import { downloadMediaFromGcs } from '@/app/api/cloud-storage/action'
+import { downloadMediaFromGcs, uploadMetadataJSON } from '@/app/api/cloud-storage/action'
 import { getAspectRatio } from '@/app/ui/edit-components/EditImageDropzone'
 import { saveGenerationMetadata, GenerationMetadata } from '@/app/api/generation-metadata'
 import theme from '../../theme'
@@ -320,6 +320,39 @@ export default function Page() {
       } else {
         console.error('❌ Failed to save video to history:', result.error)
       }
+      
+      // Also upload metadata to GCS alongside each video
+      const bucketName = process.env.NEXT_PUBLIC_OUTPUT_BUCKET
+      if (bucketName && appContext?.userID) {
+        for (const vid of videos) {
+          try {
+            // Extract the path from gcsUri (gs://bucket/path/file.mp4 -> path/file.mp4)
+            const gcsPath = vid.gcsUri.replace(`gs://${bucketName}/`, '')
+            // Replace file extension with .json
+            const jsonPath = gcsPath.replace(/\.(mp4|mov|webm)$/i, '.json')
+            
+            // Create a simplified metadata object for GCS
+            const gcsMetadata = {
+              model: video.modelVersion,
+              prompt: metadata.prompt,
+              aspectRatio: metadata.formData.aspectRatio,
+              resolution: metadata.formData.resolution,
+              duration: metadata.formData.durationSeconds,
+              timestamp: new Date().toISOString(),
+              performance: {
+                tokensUsed: video.metadata?.tokensUsed,
+                totalTokens: video.metadata?.totalTokens,
+                executionTimeMs: video.metadata?.executionTimeMs,
+              },
+            }
+            
+            await uploadMetadataJSON(gcsMetadata, bucketName, jsonPath)
+            console.log(`📤 Uploaded metadata to GCS: ${jsonPath}`)
+          } catch (error) {
+            console.error(`Failed to upload metadata for ${vid.gcsUri}:`, error)
+          }
+        }
+      }
     } catch (error) {
       console.error('Error saving video to history:', error)
     }
@@ -374,6 +407,44 @@ export default function Page() {
         console.log('✅ Image saved to history:', result.path)
       } else {
         console.error('❌ Failed to save image to history:', result.error)
+      }
+      
+      // Also upload metadata to GCS alongside each image
+      const bucketName = process.env.NEXT_PUBLIC_OUTPUT_BUCKET
+      if (bucketName && appContext?.userID) {
+        for (const img of images) {
+          try {
+            // Extract the path from gcsUri (gs://bucket/path/file.png -> path/file.png)
+            const gcsPath = img.gcsUri.replace(`gs://${bucketName}/`, '')
+            // Replace file extension with .json
+            const jsonPath = gcsPath.replace(/\.(png|jpg|jpeg|webp)$/i, '.json')
+            
+            // Create a complete metadata object for GCS
+            const gcsMetadata = {
+              model: image.modelVersion,
+              prompt: image.prompt,
+              aspectRatio: image.ratio,
+              timestamp: new Date().toISOString(),
+              performance: {
+                executionTimeMs: image.metadata?.executionTimeMs,
+                startTime: image.metadata?.startTime,
+                endTime: image.metadata?.endTime,
+                tokensUsed: image.metadata?.tokensUsed,
+                inputTokens: image.metadata?.inputTokens,
+                outputTokens: image.metadata?.outputTokens,
+                totalTokens: image.metadata?.totalTokens,
+                perImageTokens: image.metadata?.perImageTokens,
+                estimatedCost: image.metadata?.estimatedCost,
+              },
+              parameters: image.metadata?.parameters || {},
+            }
+            
+            await uploadMetadataJSON(gcsMetadata, bucketName, jsonPath)
+            console.log(`📤 Uploaded metadata to GCS: ${jsonPath}`)
+          } catch (error) {
+            console.error(`Failed to upload metadata for ${img.gcsUri}:`, error)
+          }
+        }
       }
     } catch (error) {
       console.error('Error saving image to history:', error)
@@ -476,24 +547,8 @@ export default function Page() {
 
           {isImageMode && <GenerateForm key="image-form" {...imageFormProps} />}
           {isVideoEnabled && !isImageMode && <GenerateForm key="video-form" {...videoFormProps} />}
-        </Grid>
-        <Grid size={0.9} flex={1} sx={{ pt: 14, maxWidth: 850, minWidth: 400 }}>
-          {isImageMode ? (
-            <OutputImagesDisplay
-              isLoading={isLoading}
-              generatedImagesInGCS={generatedImages}
-              generatedCount={generatedCount}
-              isPromptReplayAvailable={true}
-            />
-          ) : (
-            <OutputVideosDisplay
-              isLoading={isLoading}
-              generatedVideosInGCS={generatedVideos}
-              generatedCount={generatedCount}
-            />
-          )}
           
-          {/* Recent Generations */}
+          {/* Recent Generations - Moved to left side */}
           {recentGenerations.length > 0 && !isLoading && (
             <Box sx={{ mt: 4, pt: 3, borderTop: `1px solid ${palette.divider}` }}>
               <Typography variant="h6" sx={{ mb: 1, fontWeight: 500, color: palette.text.secondary }}>
@@ -503,7 +558,7 @@ export default function Page() {
                 {recentGenerations.slice(0, 6).map((item, index) => {
                   const isVideo = isVideoItem(item)
                   return (
-                    <Grid key={item.key + '_recent_' + index} size={{ xs: 6, sm: 4, md: 3 }}>
+                    <Grid key={item.key + '_recent_' + index} size={{ xs: 6, sm: 6, md: 4 }}>
                       <Box
                         sx={{
                           position: 'relative',
@@ -561,20 +616,9 @@ export default function Page() {
                                   display: 'flex',
                                   alignItems: 'center',
                                   justifyContent: 'center',
-                                  backgroundColor: 'rgba(0,0,0,0.3)',
-                                  transition: 'background-color 0.2s',
-                                  '&:hover': {
-                                    backgroundColor: 'rgba(0,0,0,0.5)',
-                                  },
                                 }}
                               >
-                                <PlayCircleOutline
-                                  sx={{
-                                    fontSize: 48,
-                                    color: 'white',
-                                    opacity: 0.9,
-                                  }}
-                                />
+                                <PlayCircleOutline sx={{ fontSize: '3rem', color: 'white', opacity: 0.9 }} />
                               </Box>
                             </>
                           ) : (
@@ -585,25 +629,9 @@ export default function Page() {
                                 width: '100%',
                                 height: 'auto',
                                 display: 'block',
-                                transition: 'opacity 0.2s',
                               }}
                             />
                           )}
-                        </Box>
-                        <Box
-                          sx={{
-                            position: 'absolute',
-                            top: 4,
-                            right: 4,
-                            backgroundColor: 'rgba(0,0,0,0.7)',
-                            color: 'white',
-                            px: 1,
-                            py: 0.5,
-                            borderRadius: 0.5,
-                            fontSize: '0.7rem',
-                          }}
-                        >
-                          {isVideo ? '🎬 Video' : '🖼️ Image'}
                         </Box>
                       </Box>
                     </Grid>
@@ -611,6 +639,22 @@ export default function Page() {
                 })}
               </Grid>
             </Box>
+          )}
+        </Grid>
+        <Grid size={0.9} flex={1} sx={{ pt: 14, maxWidth: 850, minWidth: 400 }}>
+          {isImageMode ? (
+            <OutputImagesDisplay
+              isLoading={isLoading}
+              generatedImagesInGCS={generatedImages}
+              generatedCount={generatedCount}
+              isPromptReplayAvailable={true}
+            />
+          ) : (
+            <OutputVideosDisplay
+              isLoading={isLoading}
+              generatedVideosInGCS={generatedVideos}
+              generatedCount={generatedCount}
+            />
           )}
         </Grid>
       </Grid>

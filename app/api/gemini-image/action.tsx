@@ -338,7 +338,8 @@ export async function generateImageWithGemini(
   if (formData.personGeneration) parameters.personGeneration = formData.personGeneration
   if (formData.negativePrompt) parameters.negativePrompt = formData.negativePrompt
   if (formData.seedNumber) parameters.seedNumber = formData.seedNumber
-  parameters.prompt = fullPrompt.substring(0, 150) + '...'
+  // Use original user prompt, not the full prompt with style attributes
+  parameters.prompt = formData.prompt
   
   // Only include metadata with actual data
   const generationMetadata: any = {
@@ -655,7 +656,8 @@ export async function editImageWithGemini(
   if (formData.negativePrompt) {
     editParameters.negativePrompt = formData.negativePrompt
   }
-  editParameters.prompt = formData.prompt.substring(0, 150) + '...'
+  // Use original user prompt
+  editParameters.prompt = formData.prompt
   
   const editMetadata: any = {
     executionTimeMs,

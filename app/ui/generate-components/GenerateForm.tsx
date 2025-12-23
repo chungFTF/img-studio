@@ -147,6 +147,7 @@ export default function GenerateForm({
   const referenceImages = watch('referenceImages')
   const isVideoWithAudio = watch('isVideoWithAudio')
   const interpolImageFirst = watch('interpolImageFirst')
+  const interpolImageFirstBase64 = watch('interpolImageFirst.base64Image') // Watch nested field for cache
   const interpolImageLast = watch('interpolImageLast')
   const selectedRatio = watch('aspectRatio')
   const firstImageRatio = watch('interpolImageFirst.ratio')
@@ -154,6 +155,7 @@ export default function GenerateForm({
   const currentModel = watch('modelVersion')
   const currentPrimaryStyle = watch('style')
   const currentSecondaryStyle = watch('secondary_style')
+  const videoMode = watch('videoMode') // Track video generation mode
 
   // --- LocalStorage keys for caching (separated by generation type) ---
   const STORAGE_KEY_PREFIX = generationType === 'Video' ? 'veo' : 'imagen'
@@ -231,7 +233,6 @@ export default function GenerateForm({
         if (!initialPrompt) {
           const cachedPrompt = localStorage.getItem(STORAGE_KEY_PROMPT)
           if (cachedPrompt) {
-            console.log(`📦 Loading cached ${generationType} prompt`)
             setValue('prompt', cachedPrompt)
           }
         }
@@ -248,7 +249,6 @@ export default function GenerateForm({
               if (Array.isArray(parsedImages) && parsedImages.length > 0) {
                 const validImages = parsedImages.filter((img) => img.base64Image !== '')
                 if (validImages.length > 0) {
-                  console.log('📦 Loading cached reference images:', validImages.length)
                   setValue('referenceImages', parsedImages)
                 }
               }
@@ -256,15 +256,21 @@ export default function GenerateForm({
           }
 
           // Load interpolation first image cache
-          const currentInterpolFirst = getValues('interpolImageFirst') as InterpolImageI
-          if (!initialITVimage && currentInterpolFirst && currentInterpolFirst.base64Image === '') {
-            const cachedInterpolFirst = localStorage.getItem(STORAGE_KEY_INTERPOL_FIRST)
-            if (cachedInterpolFirst) {
+          const cachedInterpolFirst = localStorage.getItem(STORAGE_KEY_INTERPOL_FIRST)
+          
+          if (cachedInterpolFirst && !initialITVimage) {
+            try {
               const parsedImage = JSON.parse(cachedInterpolFirst) as InterpolImageI
-              if (parsedImage.base64Image) {
-                console.log('📦 Loading cached ITV image')
-                setValue('interpolImageFirst', parsedImage)
+              if (parsedImage && parsedImage.base64Image) {
+                const currentInterpolFirst = getValues('interpolImageFirst') as InterpolImageI
+                
+                // Only load if current form doesn't have an image
+                if (!currentInterpolFirst || currentInterpolFirst.base64Image === '') {
+                  setValue('interpolImageFirst', parsedImage)
+                }
               }
+            } catch (error) {
+              console.error('Error parsing cached ITV image:', error)
             }
           }
         } else if (generationType === 'Image') {
@@ -279,7 +285,6 @@ export default function GenerateForm({
               if (Array.isArray(parsedObjects) && parsedObjects.length > 0) {
                 const validObjects = parsedObjects.filter((obj: any) => obj.base64Image !== '')
                 if (validObjects.length > 0) {
-                  console.log('📦 Loading cached reference objects:', validObjects.length)
                   setValue('referenceObjects', parsedObjects)
                 }
               }
@@ -290,7 +295,7 @@ export default function GenerateForm({
         console.error('Error loading cached data:', error)
       }
     }
-  }, [generationType]) // Run when generation type changes (tab switch)
+  }, [generationType, setValue, getValues, STORAGE_KEY_PROMPT, STORAGE_KEY_REFERENCE_IMAGES, STORAGE_KEY_INTERPOL_FIRST, STORAGE_KEY_REFERENCE_OBJECTS, initialPrompt]) // Run when generation type changes or component mounts
 
   // Manages accordion expansion based on initial image-to-video image.
   useEffect(() => {
@@ -316,9 +321,11 @@ export default function GenerateForm({
 
   // Save reference images to localStorage when they change (Video)
   useEffect(() => {
+    if (!referenceImages) return
+    
     if (generationType === 'Video' && typeof window !== 'undefined' && referenceImages.length > 0) {
       try {
-        const hasValidImages = referenceImages.some((img) => img.base64Image !== '')
+        const hasValidImages = referenceImages.some((img) => img.base64Image && img.base64Image !== '')
         if (hasValidImages) {
           localStorage.setItem(STORAGE_KEY_REFERENCE_IMAGES, JSON.stringify(referenceImages))
         }
@@ -332,13 +339,16 @@ export default function GenerateForm({
         }
       }
     }
-  }, [referenceImages, generationType, STORAGE_KEY_REFERENCE_IMAGES])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(referenceImages), generationType, STORAGE_KEY_REFERENCE_IMAGES])
 
   // Save reference objects to localStorage when they change (Image)
   useEffect(() => {
+    if (!referenceObjects) return
+    
     if (generationType === 'Image' && typeof window !== 'undefined' && referenceObjects && referenceObjects.length > 0) {
       try {
-        const hasValidObjects = referenceObjects.some((obj) => obj.base64Image !== '')
+        const hasValidObjects = referenceObjects.some((obj) => obj.base64Image && obj.base64Image !== '')
         if (hasValidObjects) {
           localStorage.setItem(STORAGE_KEY_REFERENCE_OBJECTS, JSON.stringify(referenceObjects))
         }
@@ -351,17 +361,24 @@ export default function GenerateForm({
         }
       }
     }
-  }, [referenceObjects, generationType, STORAGE_KEY_REFERENCE_OBJECTS])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(referenceObjects), generationType, STORAGE_KEY_REFERENCE_OBJECTS])
 
   // Save interpolation first image to localStorage when it changes
   useEffect(() => {
     if (
       generationType === 'Video' &&
       typeof window !== 'undefined' &&
-      interpolImageFirst.base64Image !== ''
+      interpolImageFirstBase64 &&
+      interpolImageFirstBase64 !== ''
     ) {
       try {
-        localStorage.setItem(STORAGE_KEY_INTERPOL_FIRST, JSON.stringify(interpolImageFirst))
+        // Save the entire object including base64Image
+        const dataToSave = {
+          ...interpolImageFirst,
+          base64Image: interpolImageFirstBase64
+        }
+        localStorage.setItem(STORAGE_KEY_INTERPOL_FIRST, JSON.stringify(dataToSave))
       } catch (error) {
         console.error('Error saving interpolation image to cache:', error)
         // If localStorage is full, try to clear old data
@@ -372,7 +389,7 @@ export default function GenerateForm({
         }
       }
     }
-  }, [interpolImageFirst, generationType, STORAGE_KEY_INTERPOL_FIRST])
+  }, [interpolImageFirstBase64, generationType, STORAGE_KEY_INTERPOL_FIRST, interpolImageFirst])
 
   // Sets the model version to the default for the selected options.
   useEffect(() => {
@@ -666,6 +683,20 @@ export default function GenerateForm({
     const startMs = Date.now()
 
     try {
+      // Validate based on video mode
+      if (formData.videoMode === 'image-to-video') {
+        if (!formData.interpolImageFirst || formData.interpolImageFirst.base64Image === '') {
+          throw Error('Image-to-Video mode requires a base image. Please upload an image.')
+        }
+      } else if (formData.videoMode === 'reference-image') {
+        const hasValidReferenceImage = formData.referenceImages && 
+          formData.referenceImages.length > 0 && 
+          formData.referenceImages.some(img => img.base64Image !== '')
+        if (!hasValidReferenceImage) {
+          throw Error('Reference Image mode requires at least one reference image. Please upload a reference image.')
+        }
+      }
+      
       if (formData.interpolImageLast && formData.interpolImageLast.base64Image !== '' && formData.cameraPreset !== '')
         throw Error(
           `You can't have both a last frame and a camera preset selected. Please leverage only one of the two feature at once.`
@@ -740,6 +771,38 @@ export default function GenerateForm({
               </Alert>
             )}
           </>
+
+          {/* Video Mode Selector - Only for Video generation */}
+          {generationType === 'Video' && (
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="body2" sx={{ mb: 1, fontWeight: 600, color: palette.text.secondary }}>
+                Generation Mode
+              </Typography>
+              <Stack direction="row" spacing={2}>
+                <Button
+                  variant={videoMode === 'text-only' ? 'contained' : 'outlined'}
+                  onClick={() => setValue('videoMode', 'text-only')}
+                  sx={{ flex: 1, fontSize: '0.85rem' }}
+                >
+                  📝 Text-to-Video
+                </Button>
+                <Button
+                  variant={videoMode === 'image-to-video' ? 'contained' : 'outlined'}
+                  onClick={() => setValue('videoMode', 'image-to-video')}
+                  sx={{ flex: 1, fontSize: '0.85rem' }}
+                >
+                  🖼️ Image-to-Video
+                </Button>
+                <Button
+                  variant={videoMode === 'reference-image' ? 'contained' : 'outlined'}
+                  onClick={() => setValue('videoMode', 'reference-image')}
+                  sx={{ flex: 1, fontSize: '0.85rem' }}
+                >
+                  🎨 Reference Image
+                </Button>
+              </Stack>
+            </Box>
+          )}
 
           <FormInputText
             name="prompt"
@@ -878,7 +941,7 @@ export default function GenerateForm({
               </AccordionDetails>
             </Accordion>
           )}
-          {generationType === 'Video' && (isOnlyITVavailable || isAdvancedFeaturesAvailable) && (
+          {generationType === 'Video' && videoMode === 'image-to-video' && (isOnlyITVavailable || isAdvancedFeaturesAvailable) && (
             <Accordion
               disableGutters
               expanded={expanded === 'interpolation'}
@@ -1013,7 +1076,7 @@ export default function GenerateForm({
               }
             </Accordion>
           )}
-          {generationType === 'Video' && isReferenceImagesAvailable && (
+          {generationType === 'Video' && videoMode === 'reference-image' && isReferenceImagesAvailable && (
             <Accordion
               disableGutters
               expanded={expanded === 'referenceImages'}

@@ -245,7 +245,7 @@ export default function OutputVideosDisplay({
         
         {/* Display metadata once below all videos */}
         {!isLoading && generatedVideosInGCS.length > 0 && generatedVideosInGCS[0]?.metadata && (
-          <Box sx={{ mt: 2, px: 2 }}>
+          <Box sx={{ mt: 2, mb: 24, px: 2 }}>
             <GenerationMetadataDisplay metadata={generatedVideosInGCS[0].metadata} />
           </Box>
         )}

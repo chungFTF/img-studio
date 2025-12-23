@@ -24,6 +24,7 @@ import {
 export interface GenerateVideoFormFieldsI {
   prompt: GenerateFieldI1
   modelVersion: GenerateFieldI1
+  videoMode: GenerateFieldI1  // New: text-only, image-to-video, or reference-image
   sampleCount: GenerateFieldI1
   negativePrompt: GenerateFieldI1
   seedNumber: GenerateFieldI1
@@ -47,6 +48,18 @@ export const GenerateVideoFormFields = {
   prompt: {
     type: 'textInput',
     isDataResetable: true,
+    isFullPromptAdditionalField: false,
+  },
+  videoMode: {
+    type: 'radio',
+    default: 'text-only',
+    options: ['text-only', 'image-to-video', 'reference-image'],
+    labels: {
+      'text-only': 'Text-to-Video',
+      'image-to-video': 'Image-to-Video',
+      'reference-image': 'Reference Image',
+    },
+    isDataResetable: false,
     isFullPromptAdditionalField: false,
   },
   modelVersion: {
@@ -480,6 +493,7 @@ export const tempVeo3specificSettings = {
 export interface GenerateVideoFormI {
   prompt: string
   modelVersion: string
+  videoMode: 'text-only' | 'image-to-video' | 'reference-image'  // New field
   isVideoWithAudio: boolean
   sampleCount: string
   negativePrompt: string
