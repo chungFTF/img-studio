@@ -50,12 +50,12 @@ export const VideoInterpolBox = ({
   orientation: string
 }) => {
   const initSize = {
-    width: '5vw',
-    height: '5vw',
+    width: '12vw',
+    height: '12vw',
   }
   const initMaxSize = {
-    width: 70,
-    height: 70,
+    width: 140,
+    height: 140,
   }
   const [size, setSize] = useState(initSize)
   const [maxSize, setMaxSize] = useState(initMaxSize)
@@ -66,12 +66,12 @@ export const VideoInterpolBox = ({
       setMaxSize(initMaxSize)
     } else {
       if (orientation === 'horizontal') {
-        setSize({ width: '7vw', height: '5vw' })
-        setMaxSize({ width: 100, height: 70 })
+        setSize({ width: '16vw', height: '12vw' })
+        setMaxSize({ width: 190, height: 140 })
       }
       if (orientation === 'vertical') {
-        setSize({ width: '5vw', height: '7vw' })
-        setMaxSize({ width: 70, height: 100 })
+        setSize({ width: '12vw', height: '16vw' })
+        setMaxSize({ width: 140, height: 190 })
       }
     }
   }, [orientation])

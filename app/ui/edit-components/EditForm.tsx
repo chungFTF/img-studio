@@ -44,6 +44,7 @@ import EditModeMenu from './EditModeMenu'
 import SetMaskDialog from './SetMaskDialog'
 import { downloadMediaFromGcs } from '../../api/cloud-storage/action'
 import UpscaleDialog from './UpscaleDialog'
+import { ImageCacheStorage } from '../transverse-components/ImageCacheStorage'
 const { palette } = theme
 
 const editModeField = EditImageFormFields.editMode
@@ -361,6 +362,26 @@ export default function EditForm({
             rows={3}
           />
         )}
+
+        {/* Image Cache Storage - placed right after prompt */}
+        <Box sx={{ mt: 2, mb: 2 }}>
+          <ImageCacheStorage 
+            onImageSelect={(base64Image) => {
+              setImageToEdit(base64Image)
+              // Auto-extract image properties
+              const img = new window.Image()
+              img.onload = () => {
+                setValue('width', img.width)
+                setValue('height', img.height)
+                setValue('ratio', getAspectRatio(img.width, img.height))
+                setOriginalImage(base64Image)
+                setOriginalWidth(img.width)
+                setOriginalHeight(img.height)
+              }
+              img.src = base64Image
+            }}
+          />
+        </Box>
 
         <Stack
           justifyContent={selectedEditMode?.promptIndication ? 'flex-end' : 'flex-start'}

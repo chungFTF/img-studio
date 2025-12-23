@@ -21,6 +21,7 @@ import theme from '../../theme'
 import { fileToBase64 } from '../edit-components/EditForm'
 import { Add, AddPhotoAlternate, ControlPointDuplicate } from '@mui/icons-material'
 import { getAspectRatio } from '../edit-components/EditImageDropzone'
+import { addImageToCache } from '../transverse-components/ImageCacheStorage'
 const { palette } = theme
 
 export default function ImageDropzone({
@@ -77,6 +78,9 @@ export default function ImageDropzone({
       const newImage = `data:${file.type};base64,${base64}`
       setImage(newImage)
 
+      // Add to cache automatically
+      addImageToCache(newImage, file.name)
+
       if (setValue) {
         // Set the format (MIME type) for video interpolation
         setValue(`${object}.format`, file.type)
@@ -111,6 +115,7 @@ export default function ImageDropzone({
           display: 'flex',
           alignItems: 'center',
           overflow: 'hidden',
+          borderRadius: 1, // Match ImageCacheStorage
         }}
       >
         {!image && !isUploading && (
@@ -123,11 +128,13 @@ export default function ImageDropzone({
               justifyContent: 'center',
               cursor: 'pointer',
               color: 'gray',
-              border: '1px dotted gray',
+              border: `2px dashed ${palette.divider}`, // Match ImageCacheStorage upload box
+              borderRadius: 1,
+              transition: 'all 0.2s',
               '&:hover': {
-                border: '1px solid',
+                border: `2px dashed ${palette.primary.main}`,
+                backgroundColor: palette.action.hover,
                 color: palette.primary.main,
-                borderColor: palette.primary.main,
                 '& .MuiTypography-root': {
                   color: palette.primary.main,
                   fontWeight: 500,
@@ -148,8 +155,8 @@ export default function ImageDropzone({
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              border: '1px solid',
-              borderColor: palette.primary.main,
+              border: `1px solid ${palette.primary.main}`,
+              borderRadius: 1,
               backgroundColor: palette.primary.light + '20',
             }}
           >
@@ -164,6 +171,13 @@ export default function ImageDropzone({
               height: '100%',
               display: 'inline-block',
               overflow: 'hidden',
+              border: `1px solid ${palette.divider}`, // Match ImageCacheStorage
+              borderRadius: 1,
+              transition: 'all 0.2s',
+              '&:hover': {
+                border: `2px solid ${palette.primary.main}`, // Match ImageCacheStorage hover
+                boxShadow: 2,
+              },
             }}
           >
             <Image
@@ -174,7 +188,7 @@ export default function ImageDropzone({
               style={{
                 width: '100%',
                 height: '100%',
-                objectFit: 'cover',
+                objectFit: 'contain',
                 objectPosition: 'center',
               }}
               width={0}

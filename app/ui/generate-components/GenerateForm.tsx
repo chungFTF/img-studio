@@ -54,6 +54,7 @@ import GenerateSettings from './GenerateSettings'
 import ImageToPromptModal from './ImageToPromptModal'
 import { ReferenceBox } from './ReferenceBox'
 import { VideoReferenceBox } from './VideoReferenceBox'
+import { ImageCacheStorage } from '../transverse-components/ImageCacheStorage'
 
 import theme from '../../theme'
 const { palette } = theme
@@ -88,6 +89,7 @@ import {
 } from '@/app/api/generate-video-utils'
 import { generateVideo } from '@/app/api/veo/action'
 import { getOrientation, VideoInterpolBox } from './VideoInterpolBox'
+import { getAspectRatio } from '../edit-components/EditImageDropzone'
 import { AudioSwitch } from '../ux-components/AudioButton'
 
 export default function GenerateForm({
@@ -1009,6 +1011,30 @@ export default function GenerateForm({
                         orientation={orientation}
                       />
                     </Stack>
+
+                    {/* Image Cache Storage - for quick selection of base image */}
+                    {videoMode === 'image-to-video' && (
+                      <Box sx={{ mt: 2, mb: 2 }}>
+                        <ImageCacheStorage 
+                          onImageSelect={(base64Image) => {
+                            // Set as ITV image with all required properties
+                            const img = new window.Image()
+                            img.onload = () => {
+                              setValue('interpolImageFirst', {
+                                base64Image,
+                                ratio: getAspectRatio(img.width, img.height),
+                                format: 'image/png',
+                                purpose: 'first' as const,
+                                width: img.width,
+                                height: img.height,
+                              })
+                            }
+                            img.src = base64Image
+                          }}
+                        />
+                      </Box>
+                    )}
+
                     <Box sx={{ py: 2 }}>
                       <FormInputChipGroup
                         name="cameraPreset"
@@ -1071,6 +1097,29 @@ export default function GenerateForm({
                         }
                       </Typography>
                     </Stack>
+
+                    {/* Image Cache Storage - for quick selection of base image */}
+                    {videoMode === 'image-to-video' && (
+                      <Box sx={{ mt: 2, mb: 2 }}>
+                        <ImageCacheStorage 
+                          onImageSelect={(base64Image) => {
+                            // Set as ITV image with all required properties
+                            const img = new window.Image()
+                            img.onload = () => {
+                              setValue('interpolImageFirst', {
+                                base64Image,
+                                ratio: getAspectRatio(img.width, img.height),
+                                format: 'image/png',
+                                purpose: 'first' as const,
+                                width: img.width,
+                                height: img.height,
+                              })
+                            }
+                            img.src = base64Image
+                          }}
+                        />
+                      </Box>
+                    )}
                   </AccordionDetails>
                 )
               }
@@ -1142,6 +1191,31 @@ export default function GenerateForm({
                     )
                   })}
                 </Stack>
+
+                {/* Image Cache Storage - for quick selection of reference images */}
+                {videoMode === 'reference-image' && (
+                  <Box sx={{ mt: 2, mb: 2 }}>
+                    <ImageCacheStorage 
+                      onImageSelect={(base64Image) => {
+                        // Find first empty reference image slot
+                        const emptyIndex = referenceImages.findIndex((img) => !img.base64Image || img.base64Image === '')
+                        
+                        if (emptyIndex !== -1) {
+                          // Fill first empty slot
+                          setValue(`referenceImages.${emptyIndex}.base64Image`, base64Image)
+                        } else if (referenceImages.length < maxReferenceImages) {
+                          // All slots filled but can add more, add new one
+                          addNewReferenceImage()
+                          // Wait a tick for the new image to be added to the form
+                          setTimeout(() => {
+                            setValue(`referenceImages.${referenceImages.length}.base64Image`, base64Image)
+                          }, 0)
+                        }
+                      }}
+                    />
+                  </Box>
+                )}
+
                 {referenceImages.length < maxReferenceImages && (
                   <Box sx={{ mb: 2, display: 'flex', justifyContent: 'flex-start' }}>
                     <Button

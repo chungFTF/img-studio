@@ -244,6 +244,8 @@ export async function generateVideo(
   appContext: appContextDataI | null
 ): Promise<GenerateVideoInitiationResult | ErrorResult> {
   // 0 - Check requested features
+  const videoMode = formData.videoMode || 'text-only'
+  
   const hasInterpolImageFirst =
     formData.interpolImageFirst &&
     formData.interpolImageFirst.base64Image !== '' &&
@@ -252,11 +254,15 @@ export async function generateVideo(
     formData.interpolImageLast &&
     formData.interpolImageLast.base64Image !== '' &&
     formData.interpolImageLast.format !== ''
-  const isImageToVideo =
-    (hasInterpolImageFirst && !hasInterpolImageLast) || (hasInterpolImageLast && !hasInterpolImageFirst)
-  const isInterpolation = hasInterpolImageFirst && hasInterpolImageLast
+  
+  // Use videoMode to determine the actual mode, not just the presence of images
+  const isImageToVideo = videoMode === 'image-to-video' && 
+    ((hasInterpolImageFirst && !hasInterpolImageLast) || (hasInterpolImageLast && !hasInterpolImageFirst))
+  const isInterpolation = videoMode === 'image-to-video' && hasInterpolImageFirst && hasInterpolImageLast
+  
   const isCameraPreset = formData.cameraPreset !== ''
   const hasReferenceImages =
+    videoMode === 'reference-image' &&
     formData.referenceImages &&
     Array.isArray(formData.referenceImages) &&
     formData.referenceImages.length > 0 &&
