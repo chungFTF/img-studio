@@ -29,6 +29,13 @@ export interface EditFormState {
   originalImage: string | null
   originalWidth: number | null
   originalHeight: number | null
+  // 表单数据
+  formData?: {
+    prompt?: string
+    negativePrompt?: string
+    editMode?: string
+    modelVersion?: string
+  }
 }
 
 export function useEditFormState() {
@@ -42,7 +49,8 @@ export function useEditFormState() {
       if (
         contextState.imageToEdit ||
         contextState.maskImage ||
-        contextState.selectedEditMode
+        contextState.selectedEditMode ||
+        contextState.formData
       ) {
         return {
           imageToEdit: contextState.imageToEdit || null,
@@ -54,6 +62,7 @@ export function useEditFormState() {
           originalImage: contextState.originalImage || null,
           originalWidth: contextState.originalWidth || null,
           originalHeight: contextState.originalHeight || null,
+          formData: contextState.formData,
         }
       }
     }
@@ -81,6 +90,7 @@ export function useEditFormState() {
       originalImage: null,
       originalWidth: null,
       originalHeight: null,
+      formData: undefined,
     }
   }
 
@@ -155,6 +165,7 @@ export function useEditFormState() {
       originalImage: null,
       originalWidth: null,
       originalHeight: null,
+      formData: undefined,
     }
     setState(emptyState)
 

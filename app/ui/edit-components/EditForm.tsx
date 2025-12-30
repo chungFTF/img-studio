@@ -76,14 +76,20 @@ export default function EditForm({
   errorMsg: string
   onNewErrorMsg: (newErrorMsg: string) => void
 }) {
+  // Use persistent state hook
+  const { state: persistedState, saveState, clearState } = useEditFormState()
+  
+  // Merge persisted form data with defaults
+  const initialFormValues = {
+    ...formDataEditDefaults,
+    ...(persistedState.formData || {}),
+  }
+  
   const { handleSubmit, watch, control, setValue, getValues, reset } = useForm<EditImageFormI>({
-    defaultValues: formDataEditDefaults,
+    defaultValues: initialFormValues,
   })
   const { appContext } = useAppContext()
   const { setAppContext } = useAppContext()
-  
-  // Use persistent state hook
-  const { state: persistedState, saveState, clearState } = useEditFormState()
 
   const [imageToEdit, setImageToEdit] = useState<string | null>(persistedState.imageToEdit)
   const [maskImage, setMaskImage] = useState<string | null>(persistedState.maskImage)
@@ -92,6 +98,9 @@ export default function EditForm({
 
   const [imageWidth, imageHeight, imageRatio] = watch(['width', 'height', 'ratio'])
   const currentModel = watch('modelVersion')
+  const currentPrompt = watch('prompt')
+  const currentNegativePrompt = watch('negativePrompt')
+  const currentEditMode = watch('editMode')
   const isGeminiModel = currentModel?.includes('gemini')
   const [maskSize, setMaskSize] = useState(persistedState.maskSize)
 
@@ -120,8 +129,29 @@ export default function EditForm({
       originalImage,
       originalWidth,
       originalHeight,
+      formData: {
+        prompt: currentPrompt,
+        negativePrompt: currentNegativePrompt,
+        editMode: currentEditMode,
+        modelVersion: currentModel,
+      },
     })
-  }, [imageToEdit, maskImage, maskPreview, outpaintedImage, selectedEditMode, maskSize, originalImage, originalWidth, originalHeight, saveState])
+  }, [
+    imageToEdit, 
+    maskImage, 
+    maskPreview, 
+    outpaintedImage, 
+    selectedEditMode, 
+    maskSize, 
+    originalImage, 
+    originalWidth, 
+    originalHeight,
+    currentPrompt,
+    currentNegativePrompt,
+    currentEditMode,
+    currentModel,
+    saveState
+  ])
 
   const handleNewEditMode = (value: string) => {
     resetStates()
@@ -140,6 +170,31 @@ export default function EditForm({
     if (imageWidth !== maskSize.width || imageHeight !== maskSize.height)
       setMaskSize({ width: imageWidth, height: imageHeight })
   }, [imageWidth, imageHeight])
+
+  // 恢复持久化的表单数据 - 每次组件挂载时恢复
+  useEffect(() => {
+    const savedFormData = persistedState.formData
+    
+    if (savedFormData) {
+      // 延迟执行以确保表单已完全初始化
+      const timer = setTimeout(() => {
+        if (savedFormData.prompt !== undefined) {
+          setValue('prompt', savedFormData.prompt, { shouldDirty: false })
+        }
+        if (savedFormData.negativePrompt !== undefined) {
+          setValue('negativePrompt', savedFormData.negativePrompt, { shouldDirty: false })
+        }
+        if (savedFormData.modelVersion !== undefined) {
+          setValue('modelVersion', savedFormData.modelVersion, { shouldDirty: false })
+        }
+        if (savedFormData.editMode !== undefined) {
+          setValue('editMode', savedFormData.editMode, { shouldDirty: false })
+        }
+      }, 100)
+      
+      return () => clearTimeout(timer)
+    }
+  }, [setValue]) // 依赖 setValue
 
   useEffect(() => {
     const fetchAndSetImage = async () => {
