@@ -13,8 +13,9 @@ import {
   Alert,
   Stack,
   TextField,
+  IconButton,
 } from '@mui/material'
-import { FolderOpen, Edit } from '@mui/icons-material'
+import { FolderOpen, Edit, CreateNewFolder, Check, Close } from '@mui/icons-material'
 
 // 声明 Google Picker 全局类型
 declare global {
@@ -61,6 +62,9 @@ export default function GoogleDriveSaveDialog({
   const [selectedFolder, setSelectedFolder] = React.useState<{ id: string; name: string } | null>(null)
   const [pickerApiLoaded, setPickerApiLoaded] = React.useState(false)
   const [editedFileName, setEditedFileName] = React.useState(fileName)
+  const [showCreateFolder, setShowCreateFolder] = React.useState(false)
+  const [newFolderName, setNewFolderName] = React.useState('')
+  const [creatingFolder, setCreatingFolder] = React.useState(false)
 
   // 当 fileName 改变时更新 editedFileName
   React.useEffect(() => {
@@ -98,35 +102,60 @@ export default function GoogleDriveSaveDialog({
       return
     }
 
-    const picker = new window.google.picker.PickerBuilder()
-      .addView(
-        new window.google.picker.DocsView(window.google.picker.ViewId.FOLDERS)
-          .setSelectFolderEnabled(true)
-          .setMimeTypes('application/vnd.google-apps.folder')
-      )
-      .setOAuthToken(accessToken)
-      .setDeveloperKey(process.env.NEXT_PUBLIC_GOOGLE_API_KEY || '')
-      .setCallback((data: any) => {
-        if (data.action === window.google.picker.Action.PICKED) {
-          const folder = data.docs[0]
-          setSelectedFolder({
-            id: folder.id,
-            name: folder.name,
-          })
-          setError(null)
-        }
-      })
-      .build()
+    try {
+      // 创建文件夹视图，只显示文件夹
+      const folderView = new window.google.picker.DocsView(window.google.picker.ViewId.FOLDERS)
+        .setSelectFolderEnabled(true)
+        .setIncludeFolders(true)
+        .setMimeTypes('application/vnd.google-apps.folder')
 
-    picker.setVisible(true)
+      const pickerBuilder = new window.google.picker.PickerBuilder()
+        .addView(folderView)
+        .setOAuthToken(accessToken)
+        .setTitle('Select a folder in your Google Drive')
+        .setLocale('en')
+        .enableFeature(window.google.picker.Feature.NAV_HIDDEN)
+        .enableFeature(window.google.picker.Feature.MINE_ONLY)  // 只显示用户自己的文件
+        .setCallback((data: any) => {
+          if (data.action === window.google.picker.Action.PICKED) {
+            const folder = data.docs[0]
+            setSelectedFolder({
+              id: folder.id,
+              name: folder.name,
+            })
+            setError(null)
+          } else if (data.action === window.google.picker.Action.CANCEL) {
+            // Folder picker cancelled
+          }
+        })
 
-    // 设置 z-index - Google Picker 会创建一个 div.picker-dialog
-    setTimeout(() => {
-      const pickerDialog = document.querySelector('.picker-dialog')
-      if (pickerDialog) {
-        (pickerDialog as HTMLElement).style.zIndex = '10000'
+      // API Key 是可选的 - 如果没有或无效，Picker 仍可使用 OAuth token 工作
+      const apiKey = process.env.NEXT_PUBLIC_GOOGLE_API_KEY
+      if (apiKey && apiKey.trim() && !apiKey.includes('YOUR_') && apiKey.startsWith('AIza')) {
+        pickerBuilder.setDeveloperKey(apiKey)
       }
-    }, 100)
+
+      // 添加 App ID (从 Client ID 提取)
+      const clientId = process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+      if (clientId) {
+        const appId = clientId.split('-')[0]
+        pickerBuilder.setAppId(appId)
+      }
+
+      const picker = pickerBuilder.build()
+      picker.setVisible(true)
+
+      // 设置 z-index - Google Picker 会创建一个 div.picker-dialog
+      setTimeout(() => {
+        const pickerDialog = document.querySelector('.picker-dialog')
+        if (pickerDialog) {
+          (pickerDialog as HTMLElement).style.zIndex = '10000'
+        }
+      }, 100)
+    } catch (error: any) {
+      console.error('Error opening picker:', error)
+      setError('Failed to open folder picker. Please try again.')
+    }
   }
 
   const handleSave = async () => {
@@ -156,9 +185,39 @@ export default function GoogleDriveSaveDialog({
     }
   }
 
+  const handleCreateFolder = async () => {
+    if (!newFolderName.trim()) {
+      setError('Please enter a folder name')
+      return
+    }
+
+    setCreatingFolder(true)
+    setError(null)
+    try {
+      const result = await createDriveFolder(accessToken, newFolderName.trim())
+      if (!result.success) {
+        setError(result.error || 'Failed to create folder')
+      } else {
+        setSelectedFolder({
+          id: result.fileId!,
+          name: result.fileName!,
+        })
+        setShowCreateFolder(false)
+        setNewFolderName('')
+        setError(null)
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to create folder')
+    } finally {
+      setCreatingFolder(false)
+    }
+  }
+
   const handleClose = () => {
     setSelectedFolder(null)
     setEditedFileName(fileName)
+    setShowCreateFolder(false)
+    setNewFolderName('')
     setError(null)
     setSuccessLink(null)
     onClose()
@@ -248,28 +307,109 @@ export default function GoogleDriveSaveDialog({
             )}
 
             {/* 选择文件夹按钮 */}
-            {!selectedFolder && (
-              <Button
-                variant="contained"
-                startIcon={<FolderOpen />}
-                onClick={handleOpenPicker}
-                disabled={!pickerApiLoaded}
-                fullWidth
-                size="large"
-                sx={{
-                  py: 1.5,
-                  textTransform: 'none',
-                  fontSize: '1rem',
-                }}
-              >
-                {pickerApiLoaded ? 'Select Folder from Google Drive' : 'Loading Google Picker...'}
-              </Button>
+            {!selectedFolder && !showCreateFolder && (
+              <>
+                <Button
+                  variant="contained"
+                  startIcon={<FolderOpen />}
+                  onClick={handleOpenPicker}
+                  disabled={!pickerApiLoaded}
+                  fullWidth
+                  size="large"
+                  sx={{
+                    py: 1.5,
+                    textTransform: 'none',
+                    fontSize: '1rem',
+                  }}
+                >
+                  {pickerApiLoaded ? 'Select Folder from Google Drive' : 'Loading Google Picker...'}
+                </Button>
+
+                <Box sx={{ textAlign: 'center' }}>
+                  <Typography variant="body2" sx={{ color: '#5F6368' }}>
+                    or
+                  </Typography>
+                </Box>
+
+                <Button
+                  variant="outlined"
+                  startIcon={<CreateNewFolder />}
+                  onClick={() => setShowCreateFolder(true)}
+                  fullWidth
+                  sx={{
+                    py: 1.5,
+                    textTransform: 'none',
+                    fontSize: '1rem',
+                    borderColor: '#5F6368',
+                    color: '#5F6368',
+                    '&:hover': {
+                      borderColor: '#202124',
+                      backgroundColor: '#F8F9FA',
+                    },
+                  }}
+                >
+                  Create New Folder
+                </Button>
+              </>
             )}
 
-            {!selectedFolder && pickerApiLoaded && (
-              <Typography variant="caption" sx={{ color: '#5F6368', textAlign: 'center', display: 'block' }}>
-                You can browse, search, and create folders in the picker
-              </Typography>
+            {/* 创建新文件夹表单 */}
+            {!selectedFolder && showCreateFolder && (
+              <Box
+                sx={{
+                  p: 2,
+                  bgcolor: '#F8F9FA',
+                  borderRadius: 1,
+                  border: '1px solid #E8EAED',
+                }}
+              >
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
+                  <CreateNewFolder sx={{ color: '#4285F4', mr: 1 }} />
+                  <Typography variant="body1" sx={{ fontWeight: 500, color: '#202124' }}>
+                    Create New Folder
+                  </Typography>
+                </Box>
+                <Box sx={{ display: 'flex', gap: 1, alignItems: 'center' }}>
+                  <TextField
+                    size="small"
+                    placeholder="Enter folder name"
+                    value={newFolderName}
+                    onChange={(e) => setNewFolderName(e.target.value)}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !creatingFolder && newFolderName.trim()) {
+                        handleCreateFolder()
+                      }
+                    }}
+                    sx={{ flex: 1 }}
+                    autoFocus
+                    disabled={creatingFolder}
+                  />
+                  <IconButton
+                    onClick={handleCreateFolder}
+                    disabled={creatingFolder || !newFolderName.trim()}
+                    color="primary"
+                    size="small"
+                    sx={{
+                      bgcolor: '#4285F4',
+                      color: 'white',
+                      '&:hover': { bgcolor: '#1967D2' },
+                      '&:disabled': { bgcolor: '#E8EAED' },
+                    }}
+                  >
+                    {creatingFolder ? <CircularProgress size={20} sx={{ color: 'white' }} /> : <Check />}
+                  </IconButton>
+                  <IconButton
+                    size="small"
+                    onClick={() => {
+                      setShowCreateFolder(false)
+                      setNewFolderName('')
+                    }}
+                    disabled={creatingFolder}
+                  >
+                    <Close />
+                  </IconButton>
+                </Box>
+              </Box>
             )}
 
             {error && (

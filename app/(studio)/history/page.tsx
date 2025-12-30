@@ -69,7 +69,7 @@ export default function HistoryPage() {
   const [driveDialogOpen, setDriveDialogOpen] = useState(false)
   const [selectedFileForDrive, setSelectedFileForDrive] = useState<{ url: string; fileName: string; fileData: string } | null>(null)
   const [loadingFileData, setLoadingFileData] = useState(false)
-  const { accessToken } = useGoogleDrive()
+  const { accessToken, isConnected, connectDrive, disconnectDrive, isReady } = useGoogleDrive()
   const ITEMS_PER_PAGE = 6
 
   useEffect(() => {
@@ -99,8 +99,6 @@ export default function HistoryPage() {
       setLoadingUrls(true)
       const urlsToLoad: Record<string, string> = {}
       
-      console.log(`📥 Loading ${itemsNeedingUrls.length} media URLs for page ${currentPage}...`)
-      
       for (const item of itemsNeedingUrls) {
         try {
           const signedUrl = await getSignedURL(item.outputs[0].gcsUri)
@@ -114,7 +112,6 @@ export default function HistoryPage() {
       
       if (Object.keys(urlsToLoad).length > 0) {
         setSignedUrls(prev => ({ ...prev, ...urlsToLoad }))
-        console.log(`✅ Loaded ${Object.keys(urlsToLoad).length} media URLs`)
       }
       
       setLoadingUrls(false)
@@ -275,10 +272,9 @@ export default function HistoryPage() {
             const metadataResult = await readMetadataJSON(jsonUri)
             if (metadataResult.success && metadataResult.data) {
               gcsMetadata = metadataResult.data
-              console.log(`📖 Found metadata for ${file.name}:`, gcsMetadata)
             }
           } catch (error) {
-            console.log(`No metadata found for ${file.name}, using defaults`)
+            // No metadata found, using defaults
           }
 
           // Create a metadata entry with data from GCS metadata if available
@@ -383,6 +379,41 @@ export default function HistoryPage() {
         Generation History
       </Typography>
         <Stack direction="row" spacing={2}>
+          {/* Google Drive 连接按钮 */}
+          {isConnected ? (
+            <Button
+              variant="outlined"
+              startIcon={<CloudUpload />}
+              onClick={disconnectDrive}
+              sx={{
+                borderColor: palette.success.main,
+                color: palette.success.main,
+                '&:hover': {
+                  borderColor: palette.success.dark,
+                  backgroundColor: palette.success.light + '20',
+                },
+              }}
+            >
+              Drive Connected
+            </Button>
+          ) : (
+            <Button
+              variant="outlined"
+              startIcon={<CloudUpload />}
+              onClick={connectDrive}
+              disabled={!isReady}
+              sx={{
+                borderColor: palette.primary.main,
+                color: palette.primary.main,
+                '&:hover': {
+                  borderColor: palette.primary.dark,
+                  backgroundColor: palette.primary.light + '20',
+                },
+              }}
+            >
+              {isReady ? 'Connect Google Drive' : 'Loading...'}
+            </Button>
+          )}
           <IconButton
             onClick={async () => {
               if (window.confirm('Clear all cached data and generation history?\n\nThis will:\n- Clear localStorage (prompts, images, recent generations)\n- Delete all generation history records\n- Reload the page')) {
@@ -495,14 +526,14 @@ export default function HistoryPage() {
         </Box>
       ) : (
         <>
-        <Grid container spacing={3}>
+        <Grid container spacing={1.5} sx={{ maxWidth: 1400, margin: '0 auto' }}>
             {displayedHistory.map((item) => {
               const mediaUrl = item.outputs[0]?.url || signedUrls[item.id]
               const isVideo = item.type === 'video'
               const isPlaying = playingVideo === item.id
               
               return (
-                <Grid item xs={12} sm={6} md={6} lg={4} key={item.id}>
+                <Grid item xs={12} sm={6} md={4} lg={4} key={item.id}>
               <Card
                 sx={{
                   height: '100%',
@@ -520,7 +551,7 @@ export default function HistoryPage() {
                     <Box
                       sx={{
                         position: 'relative',
-                        height: 200,
+                        height: 280,
                         backgroundColor: palette.grey[900],
                         overflow: 'hidden',
                       }}
@@ -623,21 +654,21 @@ export default function HistoryPage() {
                   display: 'flex', 
                   flexDirection: 'column', 
                   backgroundColor: palette.background.paper,
-                  p: 2,
-                  '&:last-child': { pb: 2 },
+                  p: 1,
+                  '&:last-child': { pb: 1 },
                 }}>
-                  <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.5 }}>
-                    <Stack direction="row" spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
+                  <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.2 }}>
+                    <Stack direction="row" spacing={0.3} sx={{ minWidth: 0, flex: 1 }}>
                     <Chip
                       label={item.type}
                       size="small"
                       icon={item.type === 'video' ? <VideoLibrary /> : <ImageIcon />}
                       color={item.type === 'video' ? 'secondary' : 'primary'}
                         sx={{ 
-                          fontSize: '0.95rem',
-                          height: 24,
-                          '& .MuiChip-label': { px: 1 },
-                          '& .MuiChip-icon': { fontSize: '1rem' }
+                          fontSize: '0.65rem',
+                          height: 18,
+                          '& .MuiChip-label': { px: 0.6 },
+                          '& .MuiChip-icon': { fontSize: '0.75rem', ml: 0.5 }
                         }}
                     />
                       <Chip 
@@ -647,13 +678,13 @@ export default function HistoryPage() {
                           backgroundColor: palette.grey[200],
                           color: palette.text.primary,
                           fontWeight: 500,
-                          fontSize: '0.95rem',
-                          height: 24,
-                          '& .MuiChip-label': { px: 1 }
+                          fontSize: '0.65rem',
+                          height: 18,
+                          '& .MuiChip-label': { px: 0.6 }
                         }}
                       />
                     </Stack>
-                    <Stack direction="row" spacing={1} sx={{ flexShrink: 0, ml: 13 }}>
+                    <Stack direction="row" spacing={0.5} sx={{ flexShrink: 0, ml: 1 }}>
                       <IconButton 
                         size="small" 
                         color="primary" 
@@ -669,12 +700,12 @@ export default function HistoryPage() {
                           }
                         }}
                         disabled={!item.outputs[0]?.gcsUri || loadingFileData}
-                        sx={{ flexShrink: 0 }}
+                        sx={{ flexShrink: 0, p: 0.3 }}
                       >
-                        <CloudUpload sx={{ fontSize: '1.2rem' }} />
+                        <CloudUpload sx={{ fontSize: '0.9rem' }} />
                       </IconButton>
-                      <IconButton size="small" color="error" onClick={() => handleDelete(item.id)} sx={{ flexShrink: 0 }}>
-                        <Delete sx={{ fontSize: '1.2rem' }} />
+                      <IconButton size="small" color="error" onClick={() => handleDelete(item.id)} sx={{ flexShrink: 0, p: 0.3 }}>
+                        <Delete sx={{ fontSize: '0.9rem' }} />
                       </IconButton>
                     </Stack>
                   </Stack>
@@ -683,14 +714,16 @@ export default function HistoryPage() {
                   <Typography
                     variant="body2"
                     sx={{
-                        mb: 1,
-                        mt: 0.5,
+                        mb: 0.3,
+                        mt: 0.2,
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       display: '-webkit-box',
                       WebkitLineClamp: 2,
                       WebkitBoxOrient: 'vertical',
                         color: palette.grey[500],
+                        fontSize: '0.7rem',
+                        lineHeight: 1.3,
                     }}
                   >
                     {item.prompt}
@@ -702,8 +735,8 @@ export default function HistoryPage() {
                     variant="body2" 
                     sx={{ 
                       color: palette.grey[500],
-                      fontSize: '0.875rem',
-                      mt: item.prompt ? 1 : 0.5,
+                      fontSize: '0.65rem',
+                      mt: item.prompt ? 0.3 : 0.2,
                     }}
                   >
                       {new Date(item.timestamp).toLocaleString()}

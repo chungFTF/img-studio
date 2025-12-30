@@ -18,6 +18,22 @@ import { createContext, useState, useEffect, useContext } from 'react'
 import { exportStandardFields, ExportMediaFormFieldsI } from '../api/export-utils'
 import { fetchJsonFromStorage } from '../api/cloud-storage/action'
 
+export interface EditPageState {
+  editedImagesInGCS: any[]
+  editedCount: number
+  isUpscaledDLAvailable: boolean
+  formData?: any
+  imageToEdit?: string | null
+  maskImage?: string | null
+  maskPreview?: string | null
+  outpaintedImage?: string | null
+  selectedEditMode?: any
+  maskSize?: { width: number; height: number }
+  originalImage?: string | null
+  originalWidth?: number | null
+  originalHeight?: number | null
+}
+
 export interface appContextDataI {
   gcsURI?: string
   userID?: string
@@ -27,6 +43,7 @@ export interface appContextDataI {
   imageToVideo?: string
   promptToGenerateImage?: string
   promptToGenerateVideo?: string
+  editPageState?: EditPageState
 }
 
 interface AppContextType {
@@ -34,6 +51,12 @@ interface AppContextType {
   setAppContext: React.Dispatch<React.SetStateAction<AppContextType['appContext']>>
   error: Error | string | null
   setError: React.Dispatch<React.SetStateAction<Error | string | null>>
+}
+
+export const editPageStateDefault: EditPageState = {
+  editedImagesInGCS: [],
+  editedCount: 0,
+  isUpscaledDLAvailable: true,
 }
 
 export const appContextDataDefault = {
@@ -45,6 +68,7 @@ export const appContextDataDefault = {
   imageToVideo: '',
   promptToGenerateImage: '',
   promptToGenerateVideo: '',
+  editPageState: editPageStateDefault,
 }
 
 const AppContext = createContext<AppContextType>({

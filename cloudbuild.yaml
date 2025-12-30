@@ -45,6 +45,10 @@ steps:
         '_NEXT_PUBLIC_TEAM_BUCKET=${_NEXT_PUBLIC_TEAM_BUCKET}',
         '--build-arg',
         '_NEXT_PUBLIC_EXPORT_FIELDS_OPTIONS_URI=${_NEXT_PUBLIC_EXPORT_FIELDS_OPTIONS_URI}',
+        '--build-arg',
+        '_NEXT_PUBLIC_GOOGLE_CLIENT_ID=${_NEXT_PUBLIC_GOOGLE_CLIENT_ID}',
+        '--build-arg',
+        '_NEXT_PUBLIC_GOOGLE_API_KEY=${_NEXT_PUBLIC_GOOGLE_API_KEY}',
         '.',
       ]
 images:

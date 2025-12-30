@@ -31,7 +31,11 @@ This application now supports saving generated images and videos directly to Goo
 7. Click **Create**
 8. **Copy the Client ID**
 
-### 3. Create API Key (for Google Picker)
+### 3. (Optional) Create API Key for Google Picker
+
+**Note:** API Key is optional. Google Picker can work without it using only OAuth token.
+
+If you want to create one:
 
 1. Go to **APIs & Services** > **Credentials**
 2. Click **+ CREATE CREDENTIALS** > **API key**
@@ -49,12 +53,15 @@ Create or update your `.env.local` file in the project root:
 ```bash
 # Copy this to .env.local and replace with your actual values
 NEXT_PUBLIC_GOOGLE_CLIENT_ID=your-client-id-here.apps.googleusercontent.com
-NEXT_PUBLIC_GOOGLE_API_KEY=your-api-key-here
+
+# Optional: API Key for Google Picker (can work without it)
+# NEXT_PUBLIC_GOOGLE_API_KEY=your-api-key-here
 ```
 
 **Important Notes:**
-- Both variables **MUST** start with `NEXT_PUBLIC_` to be accessible in the browser
-- Get your Client ID and API Key from Google Cloud Console > APIs & Services > Credentials
+- Variables **MUST** start with `NEXT_PUBLIC_` to be accessible in the browser
+- **Required:** `NEXT_PUBLIC_GOOGLE_CLIENT_ID` - Get from Google Cloud Console > APIs & Services > Credentials
+- **Optional:** `NEXT_PUBLIC_GOOGLE_API_KEY` - Only needed if you want additional quota/analytics
 - Client ID format: `1234567890-abcdefg.apps.googleusercontent.com`
 - API Key format: `AIzaSyXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX`
 - Restart your dev server after adding these variables

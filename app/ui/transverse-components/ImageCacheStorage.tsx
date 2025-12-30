@@ -15,9 +15,11 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { Box, Grid, IconButton, Typography, Tooltip, Stack } from '@mui/material'
-import { Delete, Add, AddPhotoAlternate } from '@mui/icons-material'
+import { Box, Grid, IconButton, Typography, Tooltip, Stack, Button } from '@mui/material'
+import { Delete, Add, AddPhotoAlternate, CloudUpload } from '@mui/icons-material'
 import { useDropzone } from 'react-dropzone'
+import { useGoogleDrive } from '@/app/context/google-drive-context'
+import GoogleDriveImagePicker from '../edit-components/GoogleDriveImagePicker'
 import theme from '../../theme'
 
 const { palette } = theme
@@ -58,6 +60,9 @@ export const ImageCacheStorage = ({
   const [cachedImages, setCachedImages] = useState<CachedImage[]>([])
   const [isUploading, setIsUploading] = useState(false)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [showDrivePicker, setShowDrivePicker] = useState(false)
+  
+  const { isConnected, connectDrive, isReady } = useGoogleDrive()
 
   // Load cached images from localStorage
   useEffect(() => {
@@ -189,6 +194,31 @@ export const ImageCacheStorage = ({
     onImageSelect(base64Image)
   }
 
+  const handleGoogleDriveClick = async () => {
+    if (!isConnected) {
+      try {
+        await connectDrive()
+        // After connecting, open picker
+        setShowDrivePicker(true)
+      } catch (error) {
+        console.error('Error connecting to Google Drive:', error)
+      }
+    } else {
+      setShowDrivePicker(true)
+    }
+  }
+
+  const handleDriveImageSelect = (base64Image: string, fileName: string) => {
+    addImageToCacheInternal(base64Image, fileName)
+    setRefreshTrigger(prev => prev + 1)
+    onImageSelect(base64Image)
+    setShowDrivePicker(false)
+  }
+
+  const handleDrivePickerClose = () => {
+    setShowDrivePicker(false)
+  }
+
   return (
     <Box sx={{ width: '100%' }}>
       <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 2 }}>
@@ -202,6 +232,17 @@ export const ImageCacheStorage = ({
         >
           Image Cache ({cachedImages.length}/{MAX_CACHE_SIZE})
         </Typography>
+        
+        {isReady && (
+          <Button
+            size="small"
+            startIcon={<CloudUpload />}
+            onClick={handleGoogleDriveClick}
+            sx={{ textTransform: 'none' }}
+          >
+            {isConnected ? 'Google Drive' : 'Connect Drive'}
+          </Button>
+        )}
       </Stack>
 
       <Grid container spacing={1}>
@@ -318,6 +359,13 @@ export const ImageCacheStorage = ({
             </Grid>
         ))}
       </Grid>
+
+      {/* Google Drive Image Picker */}
+      <GoogleDriveImagePicker
+        open={showDrivePicker}
+        onClose={handleDrivePickerClose}
+        onImageSelect={handleDriveImageSelect}
+      />
     </Box>
   )
 }

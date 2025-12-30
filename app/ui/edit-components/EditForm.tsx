@@ -45,6 +45,7 @@ import SetMaskDialog from './SetMaskDialog'
 import { downloadMediaFromGcs } from '../../api/cloud-storage/action'
 import UpscaleDialog from './UpscaleDialog'
 import { ImageCacheStorage } from '../transverse-components/ImageCacheStorage'
+import { useEditFormState } from './useEditFormState'
 const { palette } = theme
 
 const editModeField = EditImageFormFields.editMode
@@ -80,29 +81,47 @@ export default function EditForm({
   })
   const { appContext } = useAppContext()
   const { setAppContext } = useAppContext()
+  
+  // Use persistent state hook
+  const { state: persistedState, saveState, clearState } = useEditFormState()
 
-  const [imageToEdit, setImageToEdit] = useState<string | null>(null)
-  const [maskImage, setMaskImage] = useState<string | null>(null)
-  const [maskPreview, setMaskPreview] = useState<string | null>(null)
-  const [outpaintedImage, setOutpaintedImage] = useState<string | null>(null)
+  const [imageToEdit, setImageToEdit] = useState<string | null>(persistedState.imageToEdit)
+  const [maskImage, setMaskImage] = useState<string | null>(persistedState.maskImage)
+  const [maskPreview, setMaskPreview] = useState<string | null>(persistedState.maskPreview)
+  const [outpaintedImage, setOutpaintedImage] = useState<string | null>(persistedState.outpaintedImage)
 
   const [imageWidth, imageHeight, imageRatio] = watch(['width', 'height', 'ratio'])
   const currentModel = watch('modelVersion')
   const isGeminiModel = currentModel?.includes('gemini')
-  const [maskSize, setMaskSize] = useState({ width: 0, height: 0 })
+  const [maskSize, setMaskSize] = useState(persistedState.maskSize)
 
-  const [originalImage, setOriginalImage] = useState<string | null>(null)
-  const [originalWidth, setOriginalWidth] = useState<number | null>(null)
-  const [originalHeight, setOriginalHeight] = useState<number | null>(null)
+  const [originalImage, setOriginalImage] = useState<string | null>(persistedState.originalImage)
+  const [originalWidth, setOriginalWidth] = useState<number | null>(persistedState.originalWidth)
+  const [originalHeight, setOriginalHeight] = useState<number | null>(persistedState.originalHeight)
 
   const defaultEditMode = editModeOptions.find((option) => option.value === editModeField.default)
-  const [selectedEditMode, setSelectedEditMode] = useState(defaultEditMode)
+  const [selectedEditMode, setSelectedEditMode] = useState(persistedState.selectedEditMode || defaultEditMode)
   const [openMaskDialog, setOpenMaskDialog] = useState(false)
 
   // Upscale case
   const isUpscaleMode = selectedEditMode?.value === 'UPSCALE'
   const [upscaleFactor, setUpscaleFactor] = useState<string>('')
   const [openUpscaleDialog, setOpenUpscaleDialog] = useState(false)
+  
+  // Save state whenever critical fields change
+  useEffect(() => {
+    saveState({
+      imageToEdit,
+      maskImage,
+      maskPreview,
+      outpaintedImage,
+      selectedEditMode,
+      maskSize,
+      originalImage,
+      originalWidth,
+      originalHeight,
+    })
+  }, [imageToEdit, maskImage, maskPreview, outpaintedImage, selectedEditMode, maskSize, originalImage, originalWidth, originalHeight, saveState])
 
   const handleNewEditMode = (value: string) => {
     resetStates()
@@ -269,6 +288,7 @@ export default function EditForm({
     setImageToEdit(null)
     resetStates()
     reset()
+    clearState() // Clear persistent state
   }
 
   const resetStates = () => {
@@ -277,6 +297,9 @@ export default function EditForm({
     setMaskPreview(null)
     setOutpaintedImage(null)
     setMaskSize({ width: 0, height: 0 })
+    setOriginalImage(null)
+    setOriginalWidth(null)
+    setOriginalHeight(null)
     onNewErrorMsg('')
   }
 

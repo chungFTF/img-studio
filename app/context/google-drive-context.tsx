@@ -78,9 +78,10 @@ export function GoogleDriveProvider({ children }: { children: React.ReactNode })
 
       // Check if CLIENT_ID is set
       if (!CLIENT_ID) {
-        console.warn('NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set. Google Drive integration disabled.')
+        console.warn('⚠️ NEXT_PUBLIC_GOOGLE_CLIENT_ID is not set. Google Drive integration disabled.')
         setError('Google Drive is not configured')
         setIsLoading(false)
+        setIsReady(false)
         return
       }
 
@@ -102,9 +103,11 @@ export function GoogleDriveProvider({ children }: { children: React.ReactNode })
       script.src = 'https://accounts.google.com/gsi/client'
       script.async = true
       script.defer = true
-      script.onload = initializeClient
+      script.onload = () => {
+        initializeClient()
+      }
       script.onerror = () => {
-        console.error('Failed to load Google Identity Services')
+        console.error('❌ Failed to load Google Identity Services')
         setError('Failed to load Google Drive services')
         setIsLoading(false)
         setIsReady(false)
@@ -120,7 +123,7 @@ export function GoogleDriveProvider({ children }: { children: React.ReactNode })
             scope: SCOPES,
             callback: (response: any) => {
               if (response.error) {
-                console.error('OAuth error:', response.error)
+                console.error('❌ OAuth error:', response.error)
                 setError(response.error)
                 return
               }
@@ -146,7 +149,7 @@ export function GoogleDriveProvider({ children }: { children: React.ReactNode })
           throw new Error('Google Identity Services not available')
         }
       } catch (err: any) {
-        console.error('Error initializing Google client:', err)
+        console.error('❌ Error initializing Google client:', err)
         setError('Failed to initialize Google Drive')
         setIsReady(false)
       } finally {
@@ -189,9 +192,7 @@ export function GoogleDriveProvider({ children }: { children: React.ReactNode })
     
     // Revoke token
     if (accessToken && window.google) {
-      window.google.accounts.oauth2.revoke(accessToken, () => {
-        console.log('Token revoked')
-      })
+      window.google.accounts.oauth2.revoke(accessToken, () => {})
     }
   }
 

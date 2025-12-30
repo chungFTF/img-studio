@@ -22,6 +22,21 @@ export interface DriveFolder {
   mimeType: string
 }
 
+export interface DriveFile {
+  id: string
+  name: string
+  mimeType: string
+  thumbnailLink?: string
+  webContentLink?: string
+  modifiedTime?: string
+  iconLink?: string
+}
+
+export interface FolderPath {
+  id: string
+  name: string
+}
+
 export interface DriveUploadResult {
   success: boolean
   fileId?: string
@@ -182,6 +197,125 @@ export async function uploadToDrive(
       success: false,
       error: error.message,
     }
+  }
+}
+
+/**
+ * Lists files and folders from Google Drive
+ */
+export async function listDriveContents(
+  accessToken: string,
+  folderId?: string,
+  pageSize: number = 100
+): Promise<{ files: DriveFile[]; error?: string }> {
+  try {
+    const url = new URL('https://www.googleapis.com/drive/v3/files')
+    
+    // Query for folders and image files
+    let query = 'trashed=false'
+    if (folderId) {
+      query += ` and '${folderId}' in parents`
+    } else {
+      query += ` and 'root' in parents`
+    }
+    
+    url.searchParams.set('q', query)
+    url.searchParams.set('fields', 'files(id,name,mimeType,thumbnailLink,webContentLink,modifiedTime,iconLink)')
+    url.searchParams.set('orderBy', 'folder,name')
+    url.searchParams.set('pageSize', pageSize.toString())
+    url.searchParams.set('spaces', 'drive')
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Failed to list contents: ${response.status} ${errText}`)
+    }
+
+    const data = await response.json()
+    
+    return { files: data.files || [] }
+  } catch (error: any) {
+    console.error('Error listing Drive contents:', error?.message || error)
+    return { files: [], error: error.message }
+  }
+}
+
+/**
+ * Lists image files from Google Drive (kept for backward compatibility)
+ */
+export async function listDriveImages(
+  accessToken: string,
+  folderId?: string,
+  pageSize: number = 50
+): Promise<{ files: DriveFile[]; error?: string }> {
+  try {
+    const url = new URL('https://www.googleapis.com/drive/v3/files')
+    
+    // Query for image files
+    let query = '(mimeType contains "image/") and trashed=false'
+    if (folderId) {
+      query += ` and '${folderId}' in parents`
+    }
+    
+    url.searchParams.set('q', query)
+    url.searchParams.set('fields', 'files(id,name,mimeType,thumbnailLink,webContentLink,modifiedTime)')
+    url.searchParams.set('orderBy', 'modifiedTime desc')
+    url.searchParams.set('pageSize', pageSize.toString())
+    url.searchParams.set('spaces', 'drive')
+
+    const response = await fetch(url.toString(), {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Failed to list images: ${response.status} ${errText}`)
+    }
+
+    const data = await response.json()
+    
+    return { files: data.files || [] }
+  } catch (error: any) {
+    console.error('Error listing Drive images:', error?.message || error)
+    return { files: [], error: error.message }
+  }
+}
+
+/**
+ * Downloads an image from Google Drive and returns base64
+ */
+export async function downloadDriveImage(accessToken: string, fileId: string): Promise<{ base64?: string; error?: string }> {
+  try {
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+      },
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Failed to download image: ${response.status} ${errText}`)
+    }
+
+    const arrayBuffer = await response.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+    const base64 = buffer.toString('base64')
+    
+    // Get content type from response
+    const contentType = response.headers.get('content-type') || 'image/png'
+    const dataUrl = `data:${contentType};base64,${base64}`
+    
+    return { base64: dataUrl }
+  } catch (error: any) {
+    console.error('Error downloading Drive image:', error?.message || error)
+    return { error: error.message }
   }
 }
 

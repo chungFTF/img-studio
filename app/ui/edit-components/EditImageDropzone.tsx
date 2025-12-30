@@ -18,6 +18,7 @@ import { useDropzone } from 'react-dropzone'
 
 import theme from '../../theme'
 import { fileToBase64 } from './EditForm'
+import { addImageToCache } from '../transverse-components/ImageCacheStorage'
 const { palette } = theme
 
 export function getAspectRatio(width: number, height: number): string {
@@ -156,6 +157,9 @@ export default function EditImageDropzone({
     const newImage = `data:${file.type};base64,${base64}`
     setImageToEdit(newImage)
     initiateDimensions(newImage)
+    
+    // Add to image cache
+    addImageToCache(newImage, file.name)
   }
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop })

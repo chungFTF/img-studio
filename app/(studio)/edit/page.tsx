@@ -28,15 +28,104 @@ import { uploadMetadataJSON } from '@/app/api/cloud-storage/action'
 import theme from '../../theme'
 import EditForm from '@/app/ui/edit-components/EditForm'
 import { redirect } from 'next/navigation'
+import { editPageStateDefault } from '../../context/app-context'
 const { palette } = theme
 
+// LocalStorage key for persistence
+const EDIT_PAGE_STATE_KEY = 'img-studio-edit-page-state'
+
 export default function Page() {
-  const [editedImagesInGCS, setEditedImagesInGCS] = useState<ImageI[]>([])
+  const { appContext, error, setAppContext } = useAppContext()
+  
+  // Initialize state from context or localStorage
+  const [editedImagesInGCS, setEditedImagesInGCS] = useState<ImageI[]>(() => {
+    if (appContext?.editPageState?.editedImagesInGCS) {
+      return appContext.editPageState.editedImagesInGCS
+    }
+    // Try to restore from localStorage
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem(EDIT_PAGE_STATE_KEY)
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved)
+          return parsed.editedImagesInGCS || []
+        } catch (e) {
+          console.error('Failed to parse saved edit state:', e)
+        }
+      }
+    }
+    return []
+  })
+  
   const [isEditLoading, setIsEditLoading] = useState(false)
   const [editErrorMsg, setEditErrorMsg] = useState('')
-  const { appContext, error } = useAppContext()
-  const [editedCount, setEditedCount] = useState<number>(0)
-  const [isUpscaledDLAvailable, setIsUpscaleDLAvailable] = useState(true)
+  const [editedCount, setEditedCount] = useState<number>(() => {
+    return appContext?.editPageState?.editedCount || 0
+  })
+  const [isUpscaledDLAvailable, setIsUpscaleDLAvailable] = useState(() => {
+    return appContext?.editPageState?.isUpscaledDLAvailable ?? true
+  })
+  
+  // Save state to context and localStorage whenever it changes
+  useEffect(() => {
+    const state = {
+      editedImagesInGCS,
+      editedCount,
+      isUpscaledDLAvailable,
+    }
+    
+    // Save to context (full state)
+    setAppContext((prev) => ({
+      ...prev!,
+      editPageState: {
+        ...prev?.editPageState,
+        ...state,
+      },
+    }))
+    
+    // Save to localStorage with error handling
+    if (typeof window !== 'undefined') {
+      try {
+        // Create a lightweight version for localStorage
+        // Store only GCS URIs and minimal metadata, not base64 data
+        const lightImages = editedImagesInGCS.map(img => ({
+          key: img.key,
+          gcsUri: img.gcsUri,
+          prompt: img.prompt,
+          width: img.width,
+          height: img.height,
+          ratio: img.ratio,
+          // Exclude src (base64) to save space
+        }))
+        
+        const lightState = {
+          editedImagesInGCS: lightImages,
+          editedCount,
+          isUpscaledDLAvailable,
+        }
+        
+        localStorage.setItem(EDIT_PAGE_STATE_KEY, JSON.stringify(lightState))
+      } catch (error) {
+        // Handle QuotaExceededError gracefully
+        if (error instanceof DOMException && error.name === 'QuotaExceededError') {
+          console.warn('localStorage quota exceeded, clearing old edit state')
+          try {
+            // Clear old state to free up space
+            localStorage.removeItem(EDIT_PAGE_STATE_KEY)
+            // Try saving minimal state
+            localStorage.setItem(EDIT_PAGE_STATE_KEY, JSON.stringify({
+              editedCount,
+              isUpscaledDLAvailable,
+            }))
+          } catch (clearError) {
+            console.error('Failed to save minimal state:', clearError)
+          }
+        } else {
+          console.error('Error saving edit state to localStorage:', error)
+        }
+      }
+    }
+  }, [editedImagesInGCS, editedCount, isUpscaledDLAvailable, setAppContext])
 
   const handleImageGeneration = async (newImages: ImageI[]) => {
     setEditedImagesInGCS(newImages)
