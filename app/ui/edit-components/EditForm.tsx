@@ -46,6 +46,10 @@ import { downloadMediaFromGcs } from '../../api/cloud-storage/action'
 import UpscaleDialog from './UpscaleDialog'
 import { ImageCacheStorage } from '../transverse-components/ImageCacheStorage'
 import { useEditFormState } from './useEditFormState'
+import MultiImageUploader from './MultiImageUploader'
+import ImageInsertUploader from './ImageInsertUploader'
+import { blendImagesWithGemini } from '../../api/gemini-image/action'
+import { blendImagesWithImagen, insertImageIntoZone } from '../../api/imagen/action'
 const { palette } = theme
 
 const editModeField = EditImageFormFields.editMode
@@ -104,6 +108,24 @@ export default function EditForm({
   const isGeminiModel = currentModel?.includes('gemini')
   const [maskSize, setMaskSize] = useState(persistedState.maskSize)
 
+  // Multi-image blend state
+  const [isBlendMode, setIsBlendMode] = useState(false)
+  const [blendImages, setBlendImages] = useState<string[]>([])
+  
+  // Image insert state (for Imagen)
+  const [isInsertMode, setIsInsertMode] = useState(false)
+  const [insertBaseImage, setInsertBaseImage] = useState<string | null>(null)
+  const [insertSourceImage, setInsertSourceImage] = useState<string | null>(null)
+  
+  // Set default values for insert mode
+  useEffect(() => {
+    if (isInsertMode) {
+      setValue('maskDilation', '0.01')
+      setValue('baseSteps', '35')
+      setValue('editMode', 'EDIT_MODE_INPAINT_INSERTION')
+    }
+  }, [isInsertMode, setValue])
+
   const [originalImage, setOriginalImage] = useState<string | null>(persistedState.originalImage)
   const [originalWidth, setOriginalWidth] = useState<number | null>(persistedState.originalWidth)
   const [originalHeight, setOriginalHeight] = useState<number | null>(persistedState.originalHeight)
@@ -117,25 +139,29 @@ export default function EditForm({
   const [upscaleFactor, setUpscaleFactor] = useState<string>('')
   const [openUpscaleDialog, setOpenUpscaleDialog] = useState(false)
   
-  // Save state whenever critical fields change
+  // Save state whenever critical fields change (with debounce to avoid update loops)
   useEffect(() => {
-    saveState({
-      imageToEdit,
-      maskImage,
-      maskPreview,
-      outpaintedImage,
-      selectedEditMode,
-      maskSize,
-      originalImage,
-      originalWidth,
-      originalHeight,
-      formData: {
-        prompt: currentPrompt,
-        negativePrompt: currentNegativePrompt,
-        editMode: currentEditMode,
-        modelVersion: currentModel,
-      },
-    })
+    const timer = setTimeout(() => {
+      saveState({
+        imageToEdit,
+        maskImage,
+        maskPreview,
+        outpaintedImage,
+        selectedEditMode,
+        maskSize,
+        originalImage,
+        originalWidth,
+        originalHeight,
+        formData: {
+          prompt: currentPrompt,
+          negativePrompt: currentNegativePrompt,
+          editMode: currentEditMode,
+          modelVersion: currentModel,
+        },
+      })
+    }, 300) // 300ms 防抖延迟
+
+    return () => clearTimeout(timer)
   }, [
     imageToEdit, 
     maskImage, 
@@ -253,7 +279,111 @@ export default function EditForm({
     if (maskImage) setValue('inputMask', maskImage)
   }, [imageToEdit, maskImage, outpaintedImage])
 
+  const onInsertSubmit = async () => {
+    if (!insertBaseImage || !insertSourceImage) {
+      onNewErrorMsg('Please upload both base image and image to insert')
+      return
+    }
+
+    if (!maskImage) {
+      onNewErrorMsg('Please select a zone where to insert the image')
+      return
+    }
+
+    onRequestSent(true, parseInt(getValues('sampleCount')), true)
+
+    try {
+      const insertedImages = await insertImageIntoZone(
+        {
+          baseImage: insertBaseImage,
+          insertImage: insertSourceImage,
+          inputMask: maskImage,
+          prompt: getValues('prompt'),
+          negativePrompt: getValues('negativePrompt'),
+          modelVersion: getValues('modelVersion'),
+          sampleCount: getValues('sampleCount'),
+          outputOptions: getValues('outputOptions'),
+          personGeneration: getValues('personGeneration'),
+          maskDilation: getValues('maskDilation'),
+          baseSteps: getValues('baseSteps'),
+        },
+        appContext
+      )
+
+      if (insertedImages !== undefined && typeof insertedImages === 'object' && 'error' in insertedImages) {
+        const errorMsg = insertedImages['error'].replaceAll('Error: ', '')
+        throw Error(errorMsg)
+      } else {
+        onImageGeneration(insertedImages)
+      }
+    } catch (error: any) {
+      onNewErrorMsg(error.toString())
+    }
+  }
+
+  const onBlendSubmit = async () => {
+    if (blendImages.length < 2) {
+      onNewErrorMsg('Please upload at least 2 images to blend')
+      return
+    }
+
+    onRequestSent(true, parseInt(getValues('sampleCount')), true)
+
+    try {
+      let blendedImages
+      
+      if (isGeminiModel) {
+        // Use Gemini for blending
+        blendedImages = await blendImagesWithGemini(
+          {
+            inputImages: blendImages,
+            prompt: getValues('prompt') || 'Blend these images together seamlessly',
+            negativePrompt: getValues('negativePrompt'),
+            modelVersion: getValues('modelVersion'),
+            sampleCount: getValues('sampleCount'),
+          },
+          appContext
+        )
+      } else {
+        // Use Imagen for blending
+        blendedImages = await blendImagesWithImagen(
+          {
+            inputImages: blendImages,
+            prompt: getValues('prompt') || 'Blend these images together seamlessly',
+            negativePrompt: getValues('negativePrompt'),
+            modelVersion: getValues('modelVersion'),
+            sampleCount: getValues('sampleCount'),
+            outputOptions: getValues('outputOptions'),
+            personGeneration: getValues('personGeneration'),
+          },
+          appContext
+        )
+      }
+
+      if (blendedImages !== undefined && typeof blendedImages === 'object' && 'error' in blendedImages) {
+        const errorMsg = blendedImages['error'].replaceAll('Error: ', '')
+        throw Error(errorMsg)
+      } else {
+        onImageGeneration(blendedImages)
+      }
+    } catch (error: any) {
+      onNewErrorMsg(error.toString())
+    }
+  }
+
   const onSubmit: SubmitHandler<EditImageFormI> = async (formData: EditImageFormI) => {
+    // Handle insert mode separately (Imagen only)
+    if (isInsertMode) {
+      onInsertSubmit()
+      return
+    }
+
+    // Handle blend mode separately
+    if (isBlendMode) {
+      onBlendSubmit()
+      return
+    }
+
     onRequestSent(true, parseInt(formData.sampleCount), true)
 
     try {
@@ -341,6 +471,11 @@ export default function EditForm({
 
   const onReset = () => {
     setImageToEdit(null)
+    setBlendImages([])
+    setInsertBaseImage(null)
+    setInsertSourceImage(null)
+    setIsBlendMode(false)
+    setIsInsertMode(false)
     resetStates()
     reset()
     clearState() // Clear persistent state
@@ -401,20 +536,98 @@ export default function EditForm({
           )}
         </>
 
-        {/* Hide edit mode menu for Gemini models - they use text-based editing */}
+        {/* Mode selection */}
+        <Box sx={{ pb: 2 }}>
+          <Stack direction="row" spacing={1} sx={{ mb: 1, flexWrap: 'wrap' }}>
+            <Button
+              variant={!isBlendMode && !isInsertMode ? 'contained' : 'outlined'}
+              onClick={() => {
+                setIsBlendMode(false)
+                setIsInsertMode(false)
+                setBlendImages([])
+                setInsertBaseImage(null)
+                setInsertSourceImage(null)
+              }}
+              size="small"
+              sx={{ textTransform: 'none' }}
+            >
+              {isGeminiModel ? 'Single Edit' : 'Edit Mode'}
+            </Button>
+            <Button
+              variant={isBlendMode ? 'contained' : 'outlined'}
+              onClick={() => {
+                setIsBlendMode(true)
+                setIsInsertMode(false)
+                setInsertBaseImage(null)
+                setInsertSourceImage(null)
+              }}
+              size="small"
+              sx={{ textTransform: 'none' }}
+            >
+              Blend Images
+            </Button>
         {!isGeminiModel && (
+              <Button
+                variant={isInsertMode ? 'contained' : 'outlined'}
+                onClick={() => {
+                  setIsBlendMode(false)
+                  setIsInsertMode(true)
+                  setBlendImages([])
+                }}
+                size="small"
+                sx={{ textTransform: 'none' }}
+              >
+                Insert Image
+              </Button>
+            )}
+          </Stack>
+          <Typography variant="caption" color={palette.text.secondary} sx={{ fontStyle: 'italic' }}>
+            {isInsertMode 
+              ? 'Upload 2 images: base image + image to insert into selected zone'
+              : isBlendMode 
+              ? 'Upload 2-5 images to blend together' 
+              : isGeminiModel 
+              ? 'Edit a single image with text instructions' 
+              : 'Select edit mode below'}
+          </Typography>
+        </Box>
+
+        {/* Hide edit mode menu when in blend/insert mode or using Gemini */}
+        {!isGeminiModel && !isBlendMode && !isInsertMode && (
           <EditModeMenu handleNewEditMode={handleNewEditMode} selectedEditMode={selectedEditMode} />
         )}
         
-        {isGeminiModel && (
-          <Box sx={{ pb: 2 }}>
-            <Typography variant="body2" color={palette.text.secondary} sx={{ fontStyle: 'italic' }}>
-              Gemini uses text-based editing. Describe the changes you want to make to the image.
-            </Typography>
-          </Box>
-        )}
-
+        {/* Show different uploaders based on mode */}
         <Box sx={{ pb: 4 }}>
+          {isInsertMode ? (
+            <ImageInsertUploader
+              baseImage={insertBaseImage}
+              insertImage={insertSourceImage}
+              onBaseImageChange={(img) => {
+                setInsertBaseImage(img)
+                if (img) {
+                  setImageToEdit(img)
+                  const image = new window.Image()
+                  image.onload = () => {
+                    setValue('width', image.width)
+                    setValue('height', image.height)
+                    setValue('ratio', getAspectRatio(image.width, image.height))
+                    setMaskSize({ width: image.width, height: image.height })
+                  }
+                  image.src = img
+                }
+              }}
+              onInsertImageChange={setInsertSourceImage}
+              setErrorMsg={onNewErrorMsg}
+            />
+          ) : isBlendMode ? (
+            <MultiImageUploader
+              images={blendImages}
+              onChange={setBlendImages}
+              maxImages={5}
+              setErrorMsg={onNewErrorMsg}
+            />
+          ) : (
           <EditImageDropzone
             setImageToEdit={setImageToEdit}
             imageToEdit={imageToEdit}
@@ -428,20 +641,42 @@ export default function EditForm({
             outpaintedImage={outpaintedImage}
             setErrorMsg={onNewErrorMsg}
           />
+          )}
         </Box>
 
-        {/* For Gemini: always show prompt input. For Imagen: show based on edit mode */}
-        {(isGeminiModel || selectedEditMode?.promptIndication) && (
+        {/* Show prompt input in blend/insert mode or based on model/edit mode */}
+        {(isBlendMode || isInsertMode || isGeminiModel || selectedEditMode?.promptIndication) && (
+          <Box>
           <FormInputText
             name="prompt"
             control={control}
-            label={isGeminiModel ? 'Describe how you want to edit the image' : (selectedEditMode?.promptIndication ?? '')}
-            required={isGeminiModel || selectedEditMode?.mandatoryPrompt || false}
+              label={
+                isInsertMode
+                  ? 'Describe how to insert the second image (optional)'
+                  : isBlendMode 
+                  ? 'Describe how you want to blend these images (optional)'
+                  : isGeminiModel 
+                  ? 'Describe how you want to edit the image' 
+                  : (selectedEditMode?.promptIndication ?? '')
+              }
+              required={!isBlendMode && !isInsertMode && (isGeminiModel || selectedEditMode?.mandatoryPrompt || false)}
             rows={3}
           />
+            {isInsertMode && (
+              <Typography variant="caption" sx={{ color: palette.text.secondary, mt: 0.5, display: 'block' }}>
+                e.g., "Insert seamlessly maintaining lighting and perspective" or leave empty for automatic insertion
+              </Typography>
+            )}
+            {isBlendMode && (
+              <Typography variant="caption" sx={{ color: palette.text.secondary, mt: 0.5, display: 'block' }}>
+                e.g., "Blend with a watercolor painting style" or leave empty for automatic blending
+              </Typography>
+            )}
+          </Box>
         )}
 
-        {/* Image Cache Storage - placed right after prompt */}
+        {/* Image Cache Storage - only show in single image mode */}
+        {!isBlendMode && !isInsertMode && (
         <Box sx={{ mt: 2, mb: 2 }}>
           <ImageCacheStorage 
             onImageSelect={(base64Image) => {
@@ -460,6 +695,7 @@ export default function EditForm({
             }}
           />
         </Box>
+        )}
 
         <Stack
           justifyContent={selectedEditMode?.promptIndication ? 'flex-end' : 'flex-start'}
@@ -480,19 +716,19 @@ export default function EditForm({
               </Avatar>
             </IconButton>
           </CustomTooltip>
-          {!isUpscaleMode && !isGeminiModel && (
+          {!isUpscaleMode && !isGeminiModel && !isBlendMode && (
             <FormInputEditSettings control={control} setValue={setValue} editSettingsFields={editSettingsFields} />
           )}
-          {/* Hide mask button for Gemini models */}
-          {!isGeminiModel && selectedEditMode?.mandatoryMask && selectedEditMode?.maskType && (
+          {/* Show mask button for insert mode and regular edit modes */}
+          {!isGeminiModel && !isBlendMode && ((isInsertMode && insertBaseImage && insertSourceImage) || (selectedEditMode?.mandatoryMask && selectedEditMode?.maskType)) && (
             <Button
               variant="contained"
               onClick={handleMaskDialogOpen}
               disabled={imageToEdit === null || isLoading}
-              endIcon={isLoading ? <WatchLaterIcon /> : <Icon>{selectedEditMode?.maskButtonIcon}</Icon>}
+              endIcon={isLoading ? <WatchLaterIcon /> : <Icon>{isInsertMode ? 'ads_click' : selectedEditMode?.maskButtonIcon}</Icon>}
               sx={CustomizedSendButton}
             >
-              {selectedEditMode?.maskButtonLabel}
+              {isInsertMode ? 'Select zone' : selectedEditMode?.maskButtonLabel}
             </Button>
           )}
 
@@ -501,24 +737,44 @@ export default function EditForm({
             onClick={isUpscaleMode ? () => setOpenUpscaleDialog(true) : undefined}
             variant="contained"
             disabled={
-              isGeminiModel
+              isInsertMode
+                ? !insertBaseImage || !insertSourceImage || !maskImage || isLoading
+                : isBlendMode
+                ? blendImages.length < 2 || isLoading
+                : isGeminiModel
                 ? imageToEdit === null || isLoading
                 : (maskImage === null && selectedEditMode?.mandatoryMask) || imageToEdit === null || isLoading
             }
             endIcon={isLoading ? <WatchLaterIcon /> : <SendIcon />}
             sx={CustomizedSendButton}
           >
-            {isUpscaleMode ? 'Upscale' : 'Edit'}
+            {isUpscaleMode ? 'Upscale' : isInsertMode ? 'Insert' : isBlendMode ? 'Blend' : 'Edit'}
           </Button>
         </Stack>
       </form>
 
-      {selectedEditMode?.maskType && (
+      {(selectedEditMode?.maskType || isInsertMode) && (
         <SetMaskDialog
           handleMaskDialogClose={handleMaskDialogClose}
-          availableMaskTypes={maskTypes.filter((maskType) => selectedEditMode?.maskType.includes(maskType.value))}
+          availableMaskTypes={
+            isInsertMode 
+              ? maskTypes.filter((maskType) => maskType.value === 'manual' || maskType.value === 'background' || maskType.value === 'foreground')
+              : maskTypes.filter((maskType) => selectedEditMode?.maskType.includes(maskType.value))
+          }
           open={openMaskDialog}
-          selectedEditMode={selectedEditMode}
+          selectedEditMode={
+            isInsertMode 
+              ? {
+                  value: 'INSERT_IMAGE_MODE',
+                  label: 'Insert Image',
+                  maskDialogTitle: 'Select zone where to insert the second image',
+                  maskDialogIndication: 'Only the selected zone will be replaced with the insert image',
+                  maskType: ['manual', 'background', 'foreground'],
+                  defaultMaskDilation: 0.01,
+                  defaultBaseSteps: 35,
+                }
+              : selectedEditMode
+          }
           maskImage={maskImage}
           setMaskImage={setMaskImage}
           maskPreview={maskPreview}

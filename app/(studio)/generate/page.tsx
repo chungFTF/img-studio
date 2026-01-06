@@ -322,7 +322,7 @@ export default function Page() {
       }
       
       // Also upload metadata to GCS alongside each video
-      const bucketName = process.env.NEXT_PUBLIC_OUTPUT_BUCKET
+      const bucketName = process.env.NEXT_PUBLIC_TEAM_BUCKET
       if (bucketName && appContext?.userID) {
         for (const vid of videos) {
           try {
@@ -410,7 +410,7 @@ export default function Page() {
       }
       
       // Also upload metadata to GCS alongside each image
-      const bucketName = process.env.NEXT_PUBLIC_OUTPUT_BUCKET
+      const bucketName = process.env.NEXT_PUBLIC_TEAM_BUCKET
       if (bucketName && appContext?.userID) {
         for (const img of images) {
           try {

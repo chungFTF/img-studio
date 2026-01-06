@@ -373,12 +373,12 @@ export default function HistoryPage() {
   }
 
   return (
-    <Box sx={{ p: 5, maxWidth: 2000, margin: '0 auto' }}>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
+    <Box sx={{ p: 6, maxWidth: 2000, margin: '0 auto' }}>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4, gap: 4 }}>
         <Typography variant="h3" sx={{ fontWeight: 600, color: palette.primary.main }}>
         Generation History
       </Typography>
-        <Stack direction="row" spacing={2}>
+        <Stack direction="row" spacing={2.5}>
           {/* Google Drive 连接按钮 */}
           {isConnected ? (
             <Button
@@ -483,7 +483,7 @@ export default function HistoryPage() {
         </Alert>
       )}
 
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 3 }}>
+      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 4 }}>
         <Tabs 
           value={filter} 
           onChange={(_, newValue) => setFilter(newValue)}
@@ -513,20 +513,20 @@ export default function HistoryPage() {
       </Box>
 
       {filteredHistory.length === 0 ? (
-        <Box sx={{ textAlign: 'center', py: 6 }}>
-          <Typography variant="body1" sx={{ color: palette.text.disabled, fontWeight: 500 }}>
+        <Box sx={{ textAlign: 'center', py: 8 }}>
+          <Typography variant="h6" sx={{ color: palette.text.primary, fontWeight: 500, mb: 1 }}>
             No generation history found
           </Typography>
-          <Typography variant="body2" sx={{ color: palette.text.disabled, mt: 1, fontSize: '0.875rem' }}>
+          <Typography variant="body2" sx={{ color: palette.text.secondary, mb: 2 }}>
             Your generated images and videos will appear here
           </Typography>
-          <Typography variant="caption" sx={{ color: palette.text.secondary, mt: 2, display: 'block', fontSize: '0.8rem' }}>
+          <Typography variant="caption" sx={{ color: palette.text.secondary, display: 'block', fontSize: '0.8rem' }}>
             💡 Click the <CloudDownload fontSize="small" sx={{ verticalAlign: 'middle', mx: 0.5, fontSize: '1rem' }} /> button above to import past generations from GCS bucket
           </Typography>
         </Box>
       ) : (
         <>
-        <Grid container spacing={1.5} sx={{ maxWidth: 1400, margin: '0 auto' }}>
+        <Grid container spacing={3} sx={{ maxWidth: 1400, margin: '0 auto' }}>
             {displayedHistory.map((item) => {
               const mediaUrl = item.outputs[0]?.url || signedUrls[item.id]
               const isVideo = item.type === 'video'
@@ -654,8 +654,8 @@ export default function HistoryPage() {
                   display: 'flex', 
                   flexDirection: 'column', 
                   backgroundColor: palette.background.paper,
-                  p: 1,
-                  '&:last-child': { pb: 1 },
+                  p: 2,
+                  '&:last-child': { pb: 2 },
                 }}>
                   <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 0.2 }}>
                     <Stack direction="row" spacing={0.3} sx={{ minWidth: 0, flex: 1 }}>
@@ -833,7 +833,7 @@ export default function HistoryPage() {
                   loop
                   style={{
                     maxWidth: '100%',
-                    maxHeight: '80vh',
+                    maxHeight: '85vh',
                     width: 'auto',
                     height: 'auto',
                   }}
@@ -844,7 +844,7 @@ export default function HistoryPage() {
                   alt={fullscreenVideo.metadata.prompt}
                   style={{
                     maxWidth: '100%',
-                    maxHeight: '80vh',
+                    maxHeight: '85vh',
                     width: 'auto',
                     height: 'auto',
                     objectFit: 'contain',
@@ -852,38 +852,69 @@ export default function HistoryPage() {
                 />
               )}
               
-              {/* Video metadata */}
-              <Box sx={{ mt: 2, px: 3, pb: 3, width: '100%', maxWidth: 800 }}>
-                <Typography variant="h6" sx={{ color: 'white', mb: 1 }}>
+              {/* Metadata - 更小更紧凑 */}
+              {fullscreenVideo.metadata.prompt && (
+                <Box sx={{ mt: 1, px: 2, pb: 2, width: '100%', maxWidth: 900 }}>
+                  <Typography 
+                    variant="body2" 
+                    sx={{ 
+                      color: palette.grey[400], 
+                      fontSize: '0.75rem',
+                      mb: 0.5,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                    }}
+                  >
                   {fullscreenVideo.metadata.prompt}
                 </Typography>
                 
-                <Stack direction="row" spacing={2} flexWrap="wrap" sx={{ mb: 2 }}>
+                  <Stack direction="row" spacing={1} flexWrap="wrap" alignItems="center">
                   <Chip
                     label={fullscreenVideo.metadata.model}
                     size="small"
-                    sx={{ bgcolor: palette.primary.main, color: 'white' }}
+                      sx={{ 
+                        bgcolor: palette.primary.main, 
+                        color: 'white',
+                        height: 20,
+                        fontSize: '0.65rem',
+                        '& .MuiChip-label': { px: 0.8 }
+                      }}
                   />
                   {fullscreenVideo.metadata.parameters?.duration && (
                     <Chip
-                      label={`Duration: ${fullscreenVideo.metadata.parameters.duration}`}
+                        label={`${fullscreenVideo.metadata.parameters.duration}`}
                       size="small"
-                      sx={{ bgcolor: palette.grey[700], color: 'white' }}
+                        sx={{ 
+                          bgcolor: palette.grey[700], 
+                          color: 'white',
+                          height: 20,
+                          fontSize: '0.65rem',
+                          '& .MuiChip-label': { px: 0.8 }
+                        }}
                     />
                   )}
                   {fullscreenVideo.metadata.parameters?.resolution && (
                     <Chip
                       label={fullscreenVideo.metadata.parameters.resolution}
                       size="small"
-                      sx={{ bgcolor: palette.grey[700], color: 'white' }}
+                        sx={{ 
+                          bgcolor: palette.grey[700], 
+                          color: 'white',
+                          height: 20,
+                          fontSize: '0.65rem',
+                          '& .MuiChip-label': { px: 0.8 }
+                        }}
                     />
                   )}
-                </Stack>
-                
-                <Typography variant="caption" sx={{ color: palette.grey[400] }}>
+                    <Typography variant="caption" sx={{ color: palette.grey[500], fontSize: '0.65rem' }}>
                   {new Date(fullscreenVideo.metadata.timestamp).toLocaleString()}
                 </Typography>
+                  </Stack>
               </Box>
+              )}
             </Box>
           )}
         </DialogContent>

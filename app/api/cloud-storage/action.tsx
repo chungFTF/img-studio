@@ -46,7 +46,7 @@ export async function decomposeUri(uri: string) {
 // List all files from GCS bucket
 export async function listFilesFromGCS(prefix?: string) {
   const storage = new Storage({ projectId })
-  const bucketName = process.env.NEXT_PUBLIC_OUTPUT_BUCKET
+  const bucketName = process.env.NEXT_PUBLIC_TEAM_BUCKET
 
   if (!bucketName) {
     return {
@@ -304,12 +304,35 @@ export async function readMetadataJSON(gcsUri: string): Promise<{ success: boole
       return { success: false, error: 'Metadata file not found' }
     }
 
+    // Check if file has .json extension
+    if (!fileName.toLowerCase().endsWith('.json')) {
+      return { success: false, error: 'File is not a JSON file' }
+    }
+
+    // Get file metadata to check content type
+    const [metadata] = await file.getMetadata()
+    if (metadata.contentType && !metadata.contentType.includes('json') && metadata.contentType !== 'application/json') {
+      // If content type suggests it's not JSON, don't try to parse
+      return { success: false, error: 'File content type is not JSON' }
+    }
+
     const [contents] = await file.download()
-    const jsonData = JSON.parse(contents.toString())
+    const contentString = contents.toString('utf-8')
+    
+    // Check if content looks like JSON (starts with { or [)
+    const trimmedContent = contentString.trim()
+    if (!trimmedContent.startsWith('{') && !trimmedContent.startsWith('[')) {
+      return { success: false, error: 'File content is not valid JSON format' }
+    }
+
+    const jsonData = JSON.parse(contentString)
 
     return { success: true, data: jsonData }
   } catch (error) {
-    console.error('Error reading metadata from GCS:', error)
+    // Silently handle JSON parse errors - metadata file might not exist or be invalid
+    if (error instanceof SyntaxError) {
+      return { success: false, error: 'Invalid JSON format' }
+    }
     return {
       success: false,
       error: error instanceof Error ? error.message : 'Unknown error',

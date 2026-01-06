@@ -415,6 +415,14 @@ export interface GeminiEditFormI {
   height?: number
 }
 
+export interface GeminiBlendFormI {
+  inputImages: string[] // 多张图片的 base64
+  prompt: string
+  negativePrompt?: string
+  modelVersion: string
+  sampleCount: string
+}
+
 export async function editImageWithGemini(
   formData: GeminiEditFormI,
   appContext: appContextDataI | null
@@ -712,6 +720,211 @@ export async function editImageWithGemini(
   const imagesWithMetadata = generatedImages.map(img => ({
     ...img,
     metadata: editMetadata,
+  }))
+
+  return imagesWithMetadata
+}
+
+/**
+ * Blend multiple images using Gemini
+ */
+export async function blendImagesWithGemini(
+  formData: GeminiBlendFormI,
+  appContext: appContextDataI | null
+): Promise<ImageI[] | { error: string }> {
+  const startTime = new Date().toISOString()
+  const startMs = Date.now()
+  
+  let client
+  try {
+    const auth = new GoogleAuth({
+      scopes: 'https://www.googleapis.com/auth/cloud-platform',
+    })
+    client = await auth.getClient()
+  } catch (error) {
+    console.error('Authentication Error:', error)
+    return { error: 'Unable to authenticate your account.' }
+  }
+
+  if (!appContext?.gcsURI || !appContext?.userID) {
+    return { error: 'Application context is missing required information.' }
+  }
+
+  if (!formData.inputImages || formData.inputImages.length < 2) {
+    return { error: 'Please upload at least 2 images to blend.' }
+  }
+
+  if (formData.inputImages.length > 5) {
+    return { error: 'Maximum 5 images can be blended at once.' }
+  }
+
+  const projectId = process.env.NEXT_PUBLIC_PROJECT_ID
+  const modelVersion = formData.modelVersion || 'gemini-2.5-flash-image'
+  
+  const isGlobalEndpointRequired = modelVersion === 'gemini-3-pro-image-preview'
+  const location = isGlobalEndpointRequired ? 'global' : 'us-central1'
+  
+  const baseUrl = isGlobalEndpointRequired 
+    ? 'https://aiplatform.googleapis.com'
+    : `https://${location}-aiplatform.googleapis.com`
+  
+  const geminiAPIUrl = `${baseUrl}/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelVersion}:generateContent`
+
+  const editGcsURI = `${appContext.gcsURI}/${appContext.userID}/blended-images`
+  const bucketName = editGcsURI.replace('gs://', '').split('/')[0]
+  const uniqueFolderId = generateUniqueFolderId()
+  const folderName = editGcsURI.split(bucketName + '/')[1] + '/' + uniqueFolderId
+
+  let blendPrompt = formData.prompt || 'Blend and merge these images together seamlessly into a single cohesive image.'
+  if (formData.negativePrompt) {
+    blendPrompt = `${blendPrompt} Avoid: ${formData.negativePrompt}`
+  }
+
+  const generatedImages: ImageI[] = []
+  let totalPromptTokens = 0
+  let totalCandidatesTokens = 0
+  let totalAllTokens = 0
+
+  const sampleCount = Math.min(parseInt(formData.sampleCount) || 1, 4)
+  
+  for (let i = 0; i < sampleCount; i++) {
+    if (i > 0) {
+      await new Promise((resolve) => setTimeout(resolve, 2000))
+    }
+
+    const parts: any[] = [{ text: blendPrompt }]
+
+    for (const inputImage of formData.inputImages) {
+      const base64Image = inputImage.startsWith('data:')
+        ? inputImage.split(',')[1]
+        : inputImage
+
+      let mimeType = 'image/png'
+      if (inputImage.startsWith('data:image/')) {
+        mimeType = inputImage.split(';')[0].split(':')[1]
+      }
+
+      parts.push({
+        inlineData: {
+          mimeType: mimeType,
+          data: base64Image,
+        },
+      })
+    }
+
+    const reqData = {
+      contents: [{ role: 'user', parts: parts }],
+      generationConfig: {
+        responseModalities: ['IMAGE', 'TEXT'],
+        temperature: 1.0,
+      },
+    }
+
+    try {
+      const res = await client.request({
+        url: geminiAPIUrl,
+        method: 'POST',
+        data: reqData,
+      })
+
+      if (res.data?.usageMetadata) {
+        const usage = res.data.usageMetadata
+        totalPromptTokens += usage.promptTokenCount || 0
+        totalCandidatesTokens += usage.candidatesTokenCount || 0
+        totalAllTokens += usage.totalTokenCount || 0
+      }
+
+      if (!res.data?.candidates?.[0]?.content?.parts) {
+        console.error('No valid response from Gemini')
+        continue
+      }
+
+      const responseParts = res.data.candidates[0].content.parts
+
+      for (const part of responseParts) {
+        if (part.inlineData?.mimeType?.startsWith('image/')) {
+          const responseBase64 = part.inlineData.data
+          const responseMimeType = part.inlineData.mimeType
+          const format = responseMimeType.replace('image/', '').toUpperCase()
+          const fileName = `blended_${i}.${format.toLowerCase()}`
+          const fullObjectName = `${folderName}/${fileName}`
+
+          const uploadResult = await uploadBase64Image(responseBase64, bucketName, fullObjectName)
+
+          if (!uploadResult.success) {
+            console.error('Failed to upload image:', uploadResult.error)
+            continue
+          }
+
+          const imageGcsUri = uploadResult.fileUrl || ''
+          const signedURL = await getSignedURL(imageGcsUri)
+
+          if (typeof signedURL === 'object' && 'error' in signedURL) {
+            console.error('Failed to get signed URL:', signedURL.error)
+            continue
+          }
+
+          const today = new Date()
+          const formattedDate = today.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
+
+          const imageResult: ImageI = {
+            src: signedURL as string,
+            gcsUri: imageGcsUri,
+            format: format,
+            prompt: formData.prompt,
+            altText: `Gemini blended image ${i}`,
+            key: `${uniqueFolderId}_${i}`,
+            width: 1024,
+            height: 1024,
+            ratio: '1:1',
+            date: formattedDate,
+            author: appContext.userID || '',
+            modelVersion: modelVersion,
+            mode: 'Blended',
+          }
+
+          generatedImages.push(imageResult)
+          break
+        }
+      }
+    } catch (error: any) {
+      console.error(`Error blending images ${i + 1}/${sampleCount}:`, error.response?.data || error.message || error)
+
+      if (error.response?.status === 429) {
+        return { error: 'Rate limit exceeded. Please try again later.' }
+      }
+    }
+  }
+
+  if (generatedImages.length === 0) {
+    return { error: 'No blended images were generated. Please try again.' }
+  }
+
+  const endTime = new Date().toISOString()
+  const executionTimeMs = Date.now() - startMs
+  
+  let totalEstimatedCost: number | undefined = undefined
+  if (totalAllTokens > 0) {
+    const imageBlendCost = generatedImages.length * 0.04
+    const tokenCost = (totalAllTokens / 1000000) * 0.5
+    totalEstimatedCost = imageBlendCost + tokenCost
+  }
+
+  const imagesWithMetadata = generatedImages.map(img => ({
+    ...img,
+    metadata: {
+      executionTimeMs,
+      startTime,
+      endTime,
+      tokensUsed: totalAllTokens > 0 ? totalAllTokens : undefined,
+      estimatedCost: totalEstimatedCost,
+      parameters: {
+        model: modelVersion,
+        imageCount: formData.inputImages.length,
+        sampleCount: sampleCount.toString(),
+        blendType: 'Multi-image blend',
+      },
+    },
   }))
 
   return imagesWithMetadata

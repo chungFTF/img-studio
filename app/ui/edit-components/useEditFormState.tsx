@@ -100,8 +100,11 @@ export function useEditFormState() {
   const saveState = useCallback((newState: Partial<EditFormState>) => {
     setState((prev) => {
       const updated = { ...prev, ...newState }
+      return updated
+    })
 
-      // Save to context (full state including images)
+    // Schedule context update after render to avoid "setState during render" warning
+    setTimeout(() => {
       setAppContext((prevContext) => {
         if (!prevContext) return prevContext
         return {
@@ -111,7 +114,7 @@ export function useEditFormState() {
             editedCount: prevContext.editPageState?.editedCount || 0,
             isUpscaledDLAvailable: prevContext.editPageState?.isUpscaledDLAvailable ?? true,
             ...prevContext.editPageState,
-            ...updated,
+            ...newState,
           },
         }
       })
@@ -121,23 +124,16 @@ export function useEditFormState() {
         try {
           // Create a lightweight version without base64 images
           const lightState = {
-            selectedEditMode: updated.selectedEditMode,
-            maskSize: updated.maskSize,
-            originalWidth: updated.originalWidth,
-            originalHeight: updated.originalHeight,
-            // Don't save base64 images - they're too large for localStorage
-            // imageToEdit: null,
-            // maskImage: null,
-            // maskPreview: null,
-            // outpaintedImage: null,
-            // originalImage: null,
+            selectedEditMode: newState.selectedEditMode,
+            maskSize: newState.maskSize,
+            originalWidth: newState.originalWidth,
+            originalHeight: newState.originalHeight,
           }
           localStorage.setItem(EDIT_FORM_STATE_KEY, JSON.stringify(lightState))
         } catch (error) {
           // Handle QuotaExceededError gracefully
           if (error instanceof DOMException && error.name === 'QuotaExceededError') {
             console.warn('localStorage quota exceeded, skipping state persistence')
-            // Try to clear old data and retry with minimal state
             try {
               localStorage.removeItem(EDIT_FORM_STATE_KEY)
             } catch (clearError) {
@@ -148,9 +144,7 @@ export function useEditFormState() {
           }
         }
       }
-
-      return updated
-    })
+    }, 0)
   }, [setAppContext])
 
   // Clear state
@@ -169,25 +163,27 @@ export function useEditFormState() {
     }
     setState(emptyState)
 
-    // Clear from context
-    setAppContext((prevContext) => {
-      if (!prevContext) return prevContext
-      return {
-        ...prevContext,
-        editPageState: {
-          editedImagesInGCS: prevContext.editPageState?.editedImagesInGCS || [],
-          editedCount: prevContext.editPageState?.editedCount || 0,
-          isUpscaledDLAvailable: prevContext.editPageState?.isUpscaledDLAvailable ?? true,
-          ...prevContext.editPageState,
-          ...emptyState,
-        },
-      }
-    })
+    // Schedule context update after render
+    setTimeout(() => {
+      setAppContext((prevContext) => {
+        if (!prevContext) return prevContext
+        return {
+          ...prevContext,
+          editPageState: {
+            editedImagesInGCS: prevContext.editPageState?.editedImagesInGCS || [],
+            editedCount: prevContext.editPageState?.editedCount || 0,
+            isUpscaledDLAvailable: prevContext.editPageState?.isUpscaledDLAvailable ?? true,
+            ...prevContext.editPageState,
+            ...emptyState,
+          },
+        }
+      })
 
-    // Clear from localStorage
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem(EDIT_FORM_STATE_KEY)
-    }
+      // Clear from localStorage
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem(EDIT_FORM_STATE_KEY)
+      }
+    }, 0)
   }, [setAppContext])
 
   return {

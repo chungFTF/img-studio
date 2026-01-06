@@ -785,6 +785,333 @@ export async function editImage(formData: EditImageFormI, appContext: appContext
   }
 }
 
+export interface ImagenBlendFormI {
+  inputImages: string[]
+  prompt: string
+  negativePrompt?: string
+  modelVersion: string
+  sampleCount: string
+  outputOptions: string
+  personGeneration: string
+}
+
+export interface ImagenInsertFormI {
+  baseImage: string
+  insertImage: string
+  inputMask: string
+  prompt?: string
+  negativePrompt?: string
+  modelVersion: string
+  sampleCount: string
+  outputOptions: string
+  personGeneration: string
+  maskDilation: string
+  baseSteps: string
+}
+
+export async function blendImagesWithImagen(
+  formData: ImagenBlendFormI,
+  appContext: appContextDataI | null
+) {
+  let client
+  try {
+    const auth = new GoogleAuth({
+      scopes: 'https://www.googleapis.com/auth/cloud-platform',
+    })
+    client = await auth.getClient()
+  } catch (error) {
+    console.error(error)
+    return {
+      error: 'Unable to authenticate your account',
+    }
+  }
+
+  if (!formData.inputImages || formData.inputImages.length < 2) {
+    return { error: 'Please upload at least 2 images to blend.' }
+  }
+
+  if (formData.inputImages.length > 5) {
+    return { error: 'Maximum 5 images can be blended at once.' }
+  }
+
+  const location = process.env.NEXT_PUBLIC_VERTEX_API_LOCATION
+  const projectId = process.env.NEXT_PUBLIC_PROJECT_ID
+  const modelVersion = formData.modelVersion
+  const imagenAPIurl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelVersion}:predict`
+
+  if (!appContext?.gcsURI || !appContext?.userID) {
+    return { error: 'No provided app context' }
+  }
+
+  const blendGcsURI = `${appContext.gcsURI}/${appContext.userID}/blended-images`
+
+  // Prepare reference images
+  const referenceImages: any[] = []
+  
+  formData.inputImages.forEach((img, index) => {
+    const base64Image = img.startsWith('data:') ? img.split(',')[1] : img
+    
+    referenceImages.push({
+      referenceType: index === 0 ? 'REFERENCE_TYPE_RAW' : 'REFERENCE_TYPE_STYLE',
+      referenceId: index + 1,
+      referenceImage: {
+        bytesBase64Encoded: base64Image,
+      },
+      ...(index > 0 && {
+        styleImageConfig: {
+          styleDescription: `blend element ${index + 1}`,
+        },
+      }),
+    })
+  })
+
+  const reqData = {
+    instances: [
+      {
+        prompt: formData.prompt || 'Blend these images together seamlessly',
+        referenceImages: referenceImages,
+      },
+    ],
+    parameters: {
+      negativePrompt: formData.negativePrompt || '',
+      sampleCount: parseInt(formData.sampleCount),
+      outputOptions: {
+        mimeType: formData.outputOptions,
+      },
+      includeRaiReason: true,
+      personGeneration: formData.personGeneration,
+      storageUri: blendGcsURI,
+      editMode: 'EDIT_MODE_DEFAULT',
+    },
+  }
+
+  const opts = {
+    url: imagenAPIurl,
+    method: 'POST',
+    data: reqData,
+  }
+
+  try {
+    const res = await client.request(opts)
+
+    if (res.data.predictions === undefined) {
+      throw Error('No images were generated')
+    }
+
+    if ('raiFilteredReason' in res.data.predictions[0]) {
+      throw Error(cleanResult(res.data.predictions[0].raiFilteredReason))
+    }
+
+    const resultImages: ImagenModelResultI[] = res.data.predictions
+    const isResultBase64Images: boolean = resultImages.every((image) => image.hasOwnProperty('bytesBase64Encoded'))
+
+    let enhancedImageList
+    if (isResultBase64Images) {
+      enhancedImageList = await buildImageListFromBase64({
+        imagesBase64: resultImages,
+        targetGcsURI: blendGcsURI,
+        aspectRatio: '1:1',
+        width: 1024,
+        height: 1024,
+        usedPrompt: formData.prompt,
+        userID: appContext.userID,
+        modelVersion: modelVersion,
+        mode: 'Blended',
+      })
+    } else {
+      enhancedImageList = await buildImageListFromURI({
+        imagesInGCS: resultImages,
+        aspectRatio: '1:1',
+        width: 1024,
+        height: 1024,
+        usedPrompt: formData.prompt,
+        userID: appContext.userID,
+        modelVersion: modelVersion,
+        mode: 'Blended',
+      })
+    }
+
+    return enhancedImageList
+  } catch (error) {
+    console.error(error)
+
+    const errorString = error instanceof Error ? error.toString() : ''
+    if (errorString.includes('safety settings') || errorString.includes('usage guidelines')) {
+      return { error: errorString.replace('Error: ', '') }
+    }
+
+    const myError = error as Error & { errors?: any[] }
+    let myErrorMsg = 'Issue while blending images.'
+    
+    if (myError.errors && myError.errors.length > 0 && myError.errors[0].message) {
+      myErrorMsg = myError.errors[0].message
+    } else if (myError.message) {
+      myErrorMsg = myError.message
+    }
+
+    return { error: myErrorMsg }
+  }
+}
+
+export async function insertImageIntoZone(
+  formData: ImagenInsertFormI,
+  appContext: appContextDataI | null
+) {
+  let client
+  try {
+    const auth = new GoogleAuth({
+      scopes: 'https://www.googleapis.com/auth/cloud-platform',
+    })
+    client = await auth.getClient()
+  } catch (error) {
+    console.error(error)
+    return { error: 'Unable to authenticate your account' }
+  }
+
+  const location = process.env.NEXT_PUBLIC_VERTEX_API_LOCATION
+  const projectId = process.env.NEXT_PUBLIC_PROJECT_ID
+  const modelVersion = formData.modelVersion
+  const imagenAPIurl = `https://${location}-aiplatform.googleapis.com/v1/projects/${projectId}/locations/${location}/publishers/google/models/${modelVersion}:predict`
+
+  if (!appContext?.gcsURI || !appContext?.userID) {
+    return { error: 'No provided app context' }
+  }
+
+  const editGcsURI = `${appContext.gcsURI}/${appContext.userID}/image-insert`
+
+  const refBaseImage = formData.baseImage.startsWith('data:')
+    ? formData.baseImage.split(',')[1]
+    : formData.baseImage
+
+  const refInsertImage = formData.insertImage.startsWith('data:')
+    ? formData.insertImage.split(',')[1]
+    : formData.insertImage
+
+  const refInputMask = formData.inputMask.startsWith('data:')
+    ? formData.inputMask.split(',')[1]
+    : formData.inputMask
+
+  const reqData = {
+    instances: [
+      {
+        prompt: formData.prompt || 'Seamlessly place the subject from the reference image into the selected zone of the base image, maintaining natural lighting, perspective, and style consistency',
+        referenceImages: [
+          {
+            referenceType: 'REFERENCE_TYPE_RAW',
+            referenceId: 1,
+            referenceImage: {
+              bytesBase64Encoded: refBaseImage,
+            },
+          },
+          {
+            referenceType: 'REFERENCE_TYPE_SUBJECT',
+            referenceId: 2,
+            referenceImage: {
+              bytesBase64Encoded: refInsertImage,
+            },
+            subjectImageConfig: {
+              subjectDescription: 'the main subject or object to insert',
+              subjectType: 'SUBJECT_TYPE_DEFAULT',
+            },
+          },
+          {
+            referenceType: 'REFERENCE_TYPE_MASK',
+            referenceId: 3,
+            referenceImage: {
+              bytesBase64Encoded: refInputMask,
+            },
+            maskImageConfig: {
+              maskMode: 'MASK_MODE_USER_PROVIDED',
+              dilation: parseFloat(formData.maskDilation),
+            },
+          },
+        ],
+      },
+    ],
+    parameters: {
+      negativePrompt: formData.negativePrompt || '',
+      editConfig: {
+        baseSteps: parseInt(formData.baseSteps),
+      },
+      editMode: 'EDIT_MODE_INPAINT_INSERTION',
+      sampleCount: parseInt(formData.sampleCount),
+      outputOptions: {
+        mimeType: formData.outputOptions,
+      },
+      includeRaiReason: true,
+      personGeneration: formData.personGeneration,
+      storageUri: editGcsURI,
+    },
+  }
+
+  const opts = {
+    url: imagenAPIurl,
+    method: 'POST',
+    data: reqData,
+  }
+
+  try {
+    const res = await client.request(opts)
+
+    if (res.data.predictions === undefined) {
+      throw Error('No images were generated')
+    }
+
+    if ('raiFilteredReason' in res.data.predictions[0]) {
+      throw Error(cleanResult(res.data.predictions[0].raiFilteredReason))
+    }
+
+    const resultImages: ImagenModelResultI[] = res.data.predictions
+    const isResultBase64Images: boolean = resultImages.every((image) => image.hasOwnProperty('bytesBase64Encoded'))
+
+    let enhancedImageList
+    if (isResultBase64Images) {
+      enhancedImageList = await buildImageListFromBase64({
+        imagesBase64: resultImages,
+        targetGcsURI: editGcsURI,
+        aspectRatio: '1:1',
+        width: 1024,
+        height: 1024,
+        usedPrompt: formData.prompt || 'Image insertion',
+        userID: appContext.userID,
+        modelVersion: modelVersion,
+        mode: 'Image Insert',
+      })
+    } else {
+      enhancedImageList = await buildImageListFromURI({
+        imagesInGCS: resultImages,
+        aspectRatio: '1:1',
+        width: 1024,
+        height: 1024,
+        usedPrompt: formData.prompt || 'Image insertion',
+        userID: appContext.userID,
+        modelVersion: modelVersion,
+        mode: 'Image Insert',
+      })
+    }
+
+    return enhancedImageList
+  } catch (error) {
+    console.error(error)
+
+    const errorString = error instanceof Error ? error.toString() : ''
+    if (errorString.includes('safety settings') || errorString.includes('usage guidelines')) {
+      return { error: errorString.replace('Error: ', '') }
+    }
+
+    const myError = error as Error & { errors?: any[] }
+    let myErrorMsg = 'Issue while inserting image.'
+    
+    if (myError.errors && myError.errors.length > 0 && myError.errors[0].message) {
+      myErrorMsg = myError.errors[0].message
+    } else if (myError.message) {
+      myErrorMsg = myError.message
+    }
+
+    return { error: myErrorMsg }
+  }
+}
+
 export async function upscaleImage(
   source: { uri: string } | { base64: string },
   upscaleFactor: string,

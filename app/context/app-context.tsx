@@ -93,7 +93,7 @@ export function ContextProvider({ children }: { children: React.ReactNode }) {
           !process.env.NEXT_PUBLIC_GCS_BUCKET_LOCATION ||
           !process.env.NEXT_PUBLIC_GEMINI_MODEL ||
           !process.env.NEXT_PUBLIC_PRINCIPAL_TO_USER_FILTERS ||
-          !process.env.NEXT_PUBLIC_OUTPUT_BUCKET ||
+          !process.env.NEXT_PUBLIC_TEAM_BUCKET ||
           !process.env.NEXT_PUBLIC_TEAM_BUCKET ||
           !process.env.NEXT_PUBLIC_EXPORT_FIELDS_OPTIONS_URI
         ) {
@@ -136,7 +136,7 @@ export function ContextProvider({ children }: { children: React.ReactNode }) {
         }
 
         // 2. Set GCS URI for all edited/ generated images
-        let gcsURI = `gs://${process.env.NEXT_PUBLIC_OUTPUT_BUCKET}`
+        let gcsURI = `gs://${process.env.NEXT_PUBLIC_TEAM_BUCKET}`
 
         // 3. Check if export metadata options file exists
         let exportMetaOptions: any = {}
